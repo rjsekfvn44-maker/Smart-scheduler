@@ -1,0 +1,3806 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>HRD 스케줄러 (통합구현)</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+    <style>
+        /* =========================================
+           1. 전역 변수 및 기본 초기화 (Variables & Reset)
+           ========================================= */
+        :root {
+            /* 박스 크기 */
+            --box-init-width: 230px;   
+            --box-init-height: 320px;  
+            --panel-max-height: 65vh;
+
+            /* 글자 및 높이 */
+            --font-base: 13px;        
+            --input-height: 26px;     
+            --grid-row-height: 30px;  
+
+            /* 색상 테마 */
+            --primary: #2c3e50; 
+            --accent: #3498db; 
+            --bg-body: #f4f6f8; 
+            --bg-box: #ffffff; 
+            --border: #ccc;
+            
+            /* 섹션 배경색 */
+            --bg-sec-1: #fdf2e9; --bg-sec-2: #ffffff; --bg-sec-3: #ffffff;
+            --bg-sec-4: #ffffff; --bg-sec-5: #f0f8ff; --bg-sec-6: #e8f8f5;
+            
+            /* 버튼 색상 */
+            --btn-add: #e67e22; --btn-save: #8e44ad; --btn-reset: #c0392b; --btn-excel: #27ae60;
+        }
+
+        * { box-sizing: border-box; }
+        
+        body { 
+            font-family: 'Malgun Gothic', sans-serif; 
+            margin: 0; padding: 0; 
+            background: var(--bg-body); color: #333; 
+            height: 100vh; 
+            display: flex; flex-direction: column; overflow: hidden; 
+            font-size: var(--font-base); 
+        }
+
+        /* =========================================
+           2. 레이아웃 및 패널 (Layout & Panels)
+           ========================================= */
+        .top-panel { 
+            background: var(--bg-box); 
+            padding: 10px 115px 10px 10px; /* 우측 여백 확보 */
+            border-bottom: 3px solid var(--accent); 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 8px; 
+            align-items: flex-start; 
+            resize: vertical; 
+            overflow-y: auto;       
+            scrollbar-gutter: stable; 
+            height: auto; 
+            min-height: 300px; 
+            max-height: var(--panel-max-height);
+            position: relative; 
+            flex-shrink: 0;
+        }
+
+        .fixed-btn-group { 
+            position: absolute; top: 10px; right: 15px; 
+            flex-direction: column;
+            display: flex; gap: 5px; z-index: 100; 
+        }
+
+        .section { 
+            border: 1px solid var(--border); 
+            padding: 8px; 
+            display: flex; flex-direction: column; gap: 5px; 
+            resize: both; 
+            overflow: auto; 
+            width: var(--box-init-width);
+            height: var(--box-init-height);
+            flex-grow: 0; 
+            flex-shrink: 0;
+            background: var(--bg-box); 
+            border-radius: 4px; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        /* 각 섹션별 배경색 포인트 */
+        .section:nth-child(2) { background: var(--bg-sec-1); border-color: #e67e22; }
+        .section:nth-child(3) { background: var(--bg-sec-2); }
+        .section:nth-child(4) { background: var(--bg-sec-3); }
+        .section:nth-child(5) { background: var(--bg-sec-4); }
+        .section:nth-child(6) { background: var(--bg-sec-5); border-color: #2980b9; }
+        .section:nth-child(7) { background: var(--bg-sec-6); border-color: #1abc9c; }
+        .section:nth-child(8) { flex: 1; min-width: 350px; width: auto; resize: vertical; } 
+
+        .section-title { 
+            font-size: 1.0em; color: var(--primary); font-weight: 800; 
+            margin-bottom: 4px; border-bottom: 1px solid #eee; padding-bottom: 4px; 
+            display: flex; justify-content: space-between; align-items: center; 
+            position: sticky; top: 0; background: inherit; z-index: 10;
+        }
+
+        /* =========================================
+           3. 입력 폼 및 컨트롤 (Forms & Inputs)
+           ========================================= */
+        .input-group { 
+            display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-bottom: 2px; 
+        }
+        .label-fixed { 
+            width: 55px; font-weight: bold; color: #555; flex-shrink: 0; 
+        }
+        
+        input:not([type="checkbox"]), select { 
+            padding: 2px 4px; 
+            border: 1px solid #ccc; 
+            width: 100%; 
+            text-align: center; 
+            border-radius: 3px; 
+            font-size: inherit; 
+            height: var(--input-height); 
+        }
+        
+        input:focus, select:focus { 
+            border-color: var(--accent); 
+            outline: none; 
+            background: #f0f8ff; 
+        }
+
+        input[type="checkbox"] {
+            width: auto; height: auto; 
+            margin: 0 2px 0 0; 
+            vertical-align: middle;
+            cursor: pointer;
+        }        
+
+        /* 패턴 및 체크박스 그룹 */
+        .week-pattern-box { border: 1px dashed #aaa; padding: 5px; background: #f9f9f9; border-radius: 3px; margin-bottom: 2px; }
+        .week-label { font-size: 0.9em; font-weight: bold; color: #555; display: block; margin-bottom: 4px; }
+        .day-selector { display: flex; justify-content: space-between; font-size: 0.95em; background: #fff; padding: 2px; }
+        .day-selector label { cursor: pointer; padding: 2px; display: flex; align-items: center; }
+        .day-selector input { width: 16px; height: 16px; margin-right: 2px; transform: none; vertical-align: middle; }
+        .pattern-btn-group { display: flex; gap: 2px; margin-bottom: 4px; flex-wrap: wrap; }
+
+        /* 기타 폼 요소 */
+        .file-box { border: 1px dashed #aaa; padding: 6px; background: #fafafa; border-radius: 3px; margin-bottom: 2px; }
+        .scroll-list { border: 1px solid #eee; overflow-y: auto; font-size: 0.9em; padding: 2px; background: #fafafa; min-height: 60px; max-height: 150px; }
+        .exception-item { display: flex; flex-direction: column; border-bottom: 1px solid #ccc; padding: 3px; background: #fff8e1; margin-bottom: 2px; }
+        .exception-info { font-size: 0.85em; color: #555; display: flex; gap: 5px; flex-wrap: wrap;}
+        .exception-tag { font-size: 0.7em; padding: 1px 4px; border-radius: 3px; color: white; margin-right: 3px; }
+
+        /* =========================================
+           4. 버튼 (Buttons)
+           ========================================= */
+        button { cursor: pointer; padding: 2px 8px; border: 1px solid #bbb; border-radius: 3px; background: #eee; font-weight: bold; font-size: 0.9em; white-space: nowrap; height: var(--input-height); }
+        
+        /* =========================================
+           메인 버튼 3총사 공통 디자인 통일
+           ========================================= */
+        .btn-gen, .btn-down, .btn-start { 
+            border: none; 
+            height: 40px; 
+            font-size: 1.1em; 
+            font-weight: bold; /* 글씨 굵기 통일 */
+            padding: 0 15px; 
+            border-radius: 4px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2); 
+            cursor: pointer;
+            margin-left: 2px;
+            transition: all 0.2s ease; /* 부드러운 애니메이션 추가 */
+        }
+
+        /* 공통 마우스 오버(Hover) 효과 : 살짝 어두워지며 눌리는 느낌 */
+        .btn-gen:hover, .btn-down:hover, .btn-start:hover {
+            transform: translateY(1px);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+            filter: brightness(0.9); /* 배경색 종류와 무관하게 10% 어두워짐 */
+        }
+
+        /* 각 버튼별 고유 색상 */
+        .btn-gen { background: var(--accent); color: white; }
+        .btn-down { background: var(--btn-excel); color: white; }
+        .btn-start { background: #f1c40f; color: #333; } /* 노란 배경엔 어두운 글씨가 잘 보임 */
+        
+        .btn-add { background: var(--btn-add); color: white; border: none; float: right; }
+        .del-btn { background: #e74c3c; color: white; border: none; padding: 0 5px; height: 20px; font-size: 0.8em; }
+        .btn-pattern { font-size: 0.85em; padding: 2px 6px; background: #34495e; color: white; border: none; border-radius: 2px; height: 24px; }
+
+        .btn-save-proj { background: var(--btn-save); color: white; width: 100%; margin-top:2px; text-align: left; padding-left: 10px; transition: 0.3s; }
+        .btn-save-proj:hover { background: #cc92e6; color: black; }
+        .btn-reset { background: var(--btn-reset); color: white; width: 100%; margin-top: 5px; border-color: #96281b; text-align: left; padding-left: 10px; transition: 0.3s; }
+        .btn-reset:hover { background: #f5331d; }
+        .screen-reset { background: #27ae60; color: white; border: 1px solid #95a5a6; width: 100%; margin-top: 5px; text-align: left; padding-left: 10px; transition: 0.3s; }
+        .screen-reset:hover { background: #19db6a; color: black; }
+
+        /* =========================================
+           5. 메인 그리드 및 테이블 (Data Grids)
+           ========================================= */
+        .grid-container { 
+            flex: 1; display: flex; flex-direction: column; background: #fff; border: 1px solid #ccc; 
+            overflow: hidden; margin: 5px 10px 10px 10px; border-radius: 4px; 
+        }
+        .grid-header { display: flex; background: #eee; border-bottom: 1px solid #bbb; user-select: none; }
+        .grid-body { flex: 1; overflow-y: auto; overflow-x: hidden; }
+        .grid-row { display: flex; border-bottom: 1px solid #eee; }
+        .grid-row:nth-child(even) { background: #f9f9f9; }
+        .separator-row { background: #fff !important; height: 20px; border: none !important; }
+        .separator-row .cell { border: none !important; }
+
+        .cell { 
+            position: relative; display: flex; align-items: center; justify-content: center; 
+            border-right: 1px solid #eee; height: var(--grid-row-height); box-sizing: border-box; 
+            padding: 0 4px; overflow: hidden; 
+        }
+        .header-cell { 
+            background: #eee; font-weight: normal; border-right: 1px solid #bbb; 
+            justify-content: center; font-size: 0.9em; position: relative; 
+            height: var(--grid-row-height); display: flex; align-items: center;
+        }
+        .cell input, .cell select { border: none; background: transparent; width: 100%; height: 100%; font-size: inherit; }
+        
+        .resizer { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: col-resize; z-index: 10; background: transparent; }
+        .resizer:hover, .resizing { background: #3498db; width: 4px; }
+        
+        .bg-blue { background: #6495ED !important; color: white; border-right: 1px solid #333 !important; }
+        .bg-pink { background: #FF69B4 !important; color: white; border-right: 1px solid #333 !important; }
+        .bg-gray { background: #F1F1F1 !important; color: #333; }
+        
+        .subject-grid { flex: 1; border: 1px solid #ccc; display: flex; flex-direction: column; overflow: hidden; background: #fff; border-radius: 3px; min-height: 100px; }
+        #rdStatus { font-size: 0.8em; color: #2980b9; margin-top: 2px; white-space: pre-wrap; font-weight: bold; }
+
+        /* 검증 패널 */
+        #validationPanel { display:none; flex-direction:column; gap:5px; background:#fff3e0; border:2px solid #f39c12; padding:5px; border-radius:5px; margin-bottom:5px; font-size:0.9em; max-height:150px; overflow-y:auto; }
+        .valid-pass { border-color: #27ae60 !important; background: #e8f8f5 !important; }
+        .valid-fail { border-color: #e74c3c !important; background: #fdedec !important; }
+        .v-row { display:flex; justify-content:space-between; border-bottom:1px dashed #ccc; padding:2px 0; }
+        .v-row.error { color: #c0392b; font-weight:bold; }
+        .v-row.ok { color: #27ae60; }
+        .v-row.warn { color: #d35400; }
+
+        /* =========================================
+           6. 플로팅 UI 및 알림 (Overlays, Modals, Toasts)
+           ========================================= */
+        /* 단축키 설정 버튼 */
+        .btn-floating-settings {            
+            position: fixed; bottom: 20px; right: 20px;            
+            width: 45px; height: 45px;            
+            background-color: #34495e; color: white;            
+            border: none; border-radius: 50%; font-size: 22px;            
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3); cursor: pointer;            
+            z-index: 9000; display: flex; align-items: center; justify-content: center;            
+            transition: all 0.3s ease;        
+        }        
+        .btn-floating-settings:hover {            
+            background-color: #2c3e50;            
+            transform: scale(1.1) rotate(45deg);        
+        }
+        
+        /* 구글 시트 버튼 */
+        .btn-floating-sheet {            
+            position: fixed; bottom: 20px; right: 75px;            
+            background-color: #10ac84; color: white;            
+            border: none; border-radius: 25px; padding: 10px 20px;            
+            font-size: 14px; font-weight: bold;            
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3); cursor: pointer;            
+            z-index: 9000; display: flex; align-items: center;            
+            text-decoration: none; transition: all 0.3s ease;        
+        }        
+        .btn-floating-sheet:hover {            
+            background-color: #01a3a4;            
+            transform: translateY(-3px);            
+            box-shadow: 0 6px 12px rgba(0,0,0,0.4);        
+        }
+
+        /* 네이버 달력 버튼 */
+        .btn-floating-naver {
+            position: fixed; bottom: 20px; right: 240px; 
+            background-color: #03C75A; color: white;
+            border: none; border-radius: 25px; padding: 10px 20px;
+            font-size: 14px; font-weight: bold;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3); cursor: pointer;
+            z-index: 9000; display: flex; align-items: center;
+            text-decoration: none; transition: all 0.3s ease;
+        }
+        .btn-floating-naver:hover {
+            background-color: #02b350;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+        }
+
+        /* 토스트 알림 */
+        #toast-container { position: fixed; bottom: 100px; right: 30px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
+        .toast { min-width: 250px; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: bold; color: #fff; background-color: #333; box-shadow: 0 4px 12px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; opacity: 0; transform: translateY(20px); animation: toast-in 0.3s forwards, toast-out 0.3s forwards 2.5s; }
+        .toast.success { background-color: #2ecc71; } 
+        .toast.error   { background-color: #e74c3c; } 
+        .toast.info    { background-color: #3498db; } 
+        .toast.warning { background-color: #f1c40f; color: #333; } 
+        
+        @keyframes toast-in { to { opacity: 1; transform: translateY(0); } }
+        @keyframes toast-out { to { opacity: 0; transform: translateY(-10px); } }
+
+        /* 로딩 스피너 */
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.4); z-index: 99999; display: none; flex-direction: column; justify-content: center; align-items: center; color: white; font-size: 1.2rem; font-weight: bold; }
+        .spinner { width: 60px; height: 60px; border: 6px solid rgba(255, 255, 255, 0.3); border-top-color: #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
+        
+        @keyframes spin { to { transform: rotate(360deg); } }
+        /* 복사 버튼 스타일 */
+        .btn-copy { 
+            background: transparent; 
+            border: none; 
+            font-size: 1.1em; 
+            cursor: pointer; 
+            padding: 0 4px; 
+            transition: transform 0.2s;
+        }
+        .btn-copy:hover { 
+            transform: scale(1.2); 
+        }
+    </style>
+</head>
+<body>
+
+    <div class="top-panel" id="topPanel">
+        
+        <div class="fixed-btn-group">
+            <div style="display:flex; gap:5px; margin-bottom: 2px;">
+                <button onclick="undo()" style="flex:1; background:#7f8c8d; color:white; border:none; border-radius:3px; height:24px;" title="실행 취소 (Ctrl+Z)">↩️</button>
+                <button onclick="redo()" style="flex:1; background:#7f8c8d; color:white; border:none; border-radius:3px; height:24px;" title="다시 실행 (Ctrl+Y)">↪️</button>
+            </div>
+            <button class="btn-gen" onclick="generateSchedule()">⚡ 생성</button>
+            <button class="btn-down" onclick="exportExcel()">📥 엑셀</button>
+            <button class="btn-start" onclick="confirmStartCourse()">🟨 개강</button>
+        </div>
+
+        <div class="section" id="sec_proj">
+            <div class="section-title" style="color:#d35400;">📁 프로젝트 관리</div>
+            
+            <div class="input-group">
+                <span class="label-fixed">과목명</span> 
+                <input type="text" id="projName" placeholder="예: 자바과정" oninput="saveStateToBrowser()">
+            </div>
+            
+            <div class="input-group" style="margin-top:2px;">
+                <span class="label-fixed">회차</span> 
+                <input type="text" id="projRound" placeholder="1회" oninput="saveStateToBrowser()" onblur="formatRound(this)">
+            </div>
+            
+            <button class="btn-save-proj" onclick="saveProjectFile()" style="margin-top:4px;">💾 프로젝트 저장 (JSON)</button>
+            
+            <div style="margin-top:8px; border-top:1px dashed #ccc; padding-top:8px; display:flex; flex-direction:column; gap:4px;">
+                <div>
+                    <span style="font-size:0.7rem; font-weight:bold;">📂 프로젝트 불러오기 (JSON)</span>
+                    <input type="file" id="projFile" accept=".json" onclick="this.value=null" onchange="loadProjectFile(this)" style="margin-top:2px; font-size:0.75rem;">
+                </div>
+                <div>
+                    <span style="font-size:0.7rem; font-weight:bold; color:#27ae60;">📗 엑셀로 프로젝트 복구 (xlsx)</span>
+                    <input type="file" id="excelImportFile" accept=".xlsx" onclick="this.value=null" onchange="importFromExcel(this)" style="margin-top:2px; font-size:0.75rem;">
+                </div>
+                <button class="btn-save-proj" onclick="saveToCloud()" style="margin-top:8px; background:#2980b9;">☁️ 구글 시트에 마스터 저장</button>
+            </div>
+            
+            <button class="btn-reset" onclick="resetAll()" style="margin-top:8px;">🗑️ 스케줄 데이터 초기화</button>
+            
+            <div style="margin-top:8px; border-top:2px solid #ccc; padding-top:8px;">
+                <div style="font-size:0.75rem; font-weight:bold; color:#2c3e50; margin-bottom:4px;">🖥️ 화면 간격(레이아웃) 관리</div>
+                <div style="display:flex; gap:3px;">
+                    <button onclick="LayoutManager.manualSave()" style="flex:1; background:#34495e; color:white; border:none; padding:4px 0; font-size:0.7rem; border-radius:3px;">💾 저장</button>
+                    <button onclick="LayoutManager.manualLoad()" style="flex:1; background:#7f8c8d; color:white; border:none; padding:4px 0; font-size:0.7rem; border-radius:3px;">📂 로드</button>
+                    <button onclick="LayoutManager.reset()" style="flex:1; background:#95a5a6; color:white; border:none; padding:4px 0; font-size:0.7rem; border-radius:3px;">🔄 초기화</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="section" id="sec_date">
+            <div id="bjnAlert" style="display:none; background:#f4ecf7; border:2px dashed #9b59b6; padding:6px; border-radius:4px; margin-bottom:5px;">
+                <div style="color:#8e44ad; font-size:0.75rem; font-weight:bold; margin-bottom:3px;">📢 [BJN 변경 지시]</div>
+                <div id="bjnMessage" style="font-size:0.95rem; color:#2c3e50; font-weight:bold; margin-bottom:4px; padding-left:5px;"></div>
+                <label style="cursor:pointer; font-size:0.75rem; font-weight:bold; color:#d35400; display:block; text-align:right;">
+                    <input type="checkbox" id="chkClearM" checked> ✅ 작업 완료 (M열 지우기)
+                </label>
+            </div>
+            
+            <div class="section-title">📅 1. 기간 및 패턴</div>
+            
+            <div class="input-group">
+                <span class="label-fixed">개강일</span> 
+                <input type="date" id="startDate" onchange="saveStateToBrowser()">
+                <button class="btn-copy" onclick="copyDate('startDate')" title="개강일 복사">📋</button>
+            </div>
+            <div class="input-group">
+                <span class="label-fixed" style="color:#c0392b;">종강일</span> 
+                <input type="text" id="calcEndDateDisplay" readonly placeholder="생성 시 표시" style="background:#fdedec; color:#c0392b; font-weight:bold;">
+                <button class="btn-copy" onclick="copyDate('calcEndDateDisplay')" title="종강일 복사">📋</button>
+            </div>
+            <div class="input-group">
+                <span class="label-fixed">훈련시간</span> 
+                <input type="number" id="targetTotalHours" value="0" oninput="saveStateToBrowser()"> H
+            </div>
+            
+            <div class="pattern-btn-group" style="margin-top:5px;">
+                <button class="btn-pattern" onclick="setPattern('base', 'WEEKDAY')">월-금</button>
+                <button class="btn-pattern" onclick="setPattern('base', 'MWF')">월수금</button>
+                <button class="btn-pattern" onclick="applyBiWeekly('base', 'MWF', 'MW')">월수금/월수</button>
+                <button class="btn-pattern" onclick="setPattern('base', 'TTF')">화목금</button>
+                <button class="btn-pattern" onclick="applyBiWeekly('base', 'TTF', 'TT')">화목금/화목</button>
+                <button class="btn-pattern" onclick="setPattern('base', 'SAT')">토요일</button>
+            </div>
+            
+            <div class="week-pattern-box" style="background:#fff; border-color:#1abc9c;">
+                <span class="week-label" style="color:#16a085;">1주차(홀수주) 요일</span>
+                <div class="day-selector" id="week1Days"> 
+                    <label><input type="checkbox" value="1" checked>월</label>
+                    <label><input type="checkbox" value="2" checked>화</label>
+                    <label><input type="checkbox" value="3" checked>수</label>
+                    <label><input type="checkbox" value="4" checked>목</label>
+                    <label><input type="checkbox" value="5" checked>금</label>
+                    <label><input type="checkbox" value="6">토</label>
+                </div>
+            </div>
+            
+            <div class="week-pattern-box" style="background:#fff; border-color:#1abc9c;">
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="week-label" style="color:#16a085;">2주차(짝수주) 요일</span>
+                    <label style="font-size:0.65rem; color:#16a085; font-weight:bold;"><input type="checkbox" id="chkSamePattern" checked onchange="toggleWeek2(this)"> 1주차와 동일</label>
+                </div>
+                <div class="day-selector" id="week2Days" style="opacity: 0.5; pointer-events: none;">
+                    <label><input type="checkbox" value="1" checked>월</label>
+                    <label><input type="checkbox" value="2" checked>화</label>
+                    <label><input type="checkbox" value="3" checked>수</label>
+                    <label><input type="checkbox" value="4" checked>목</label>
+                    <label><input type="checkbox" value="5" checked>금</label>
+                    <label><input type="checkbox" value="6">토</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="section" id="sec_time">
+            <div class="section-title">⏱️ 2. 기본 시간 설정</div>
+            <div class="input-group">
+                <span class="label-fixed">시작</span> 
+                <input type="text" id="dailyStartTime" value="0930" maxlength="4" oninput="calcEndTime(); saveStateToBrowser()">
+            </div>
+            <div class="input-group">
+                <span class="label-fixed" onclick="showToast('1~24는 시간(H), 25 이상은 분(m)으로 자동 계산됩니다.<br>ex) 4.5 ➔ 4.5h / 190 ➔ 190m', 'info')" style="cursor: pointer;" title="클릭해서 도움말 보기">일일 💡</span> 
+                <input type="number" id="dailyDuration" placeholder="24시간 이상은 분으로계산 ex)1~24h / 25~1440분" step="0.1" oninput="calcEndTime(); saveStateToBrowser()" style="width: 70%;"> 
+                <span id="durUnit" style="font-weight:bold; color:#2c3e50; margin-left:2px;">H</span>
+            </div>
+            <div class="input-group">
+                <span class="label-fixed">점심</span> 
+                <input type="text" id="lunchStart" value="1230" style="width:40px;" maxlength="4" oninput="calcEndTime(); saveStateToBrowser()">~
+                <input type="text" id="lunchEnd" value="1300" style="width:40px;" maxlength="4" oninput="calcEndTime(); saveStateToBrowser()">
+            </div>
+            <div class="input-group" style="justify-content: flex-end;">
+                <label style="font-size:0.7rem;"><input type="checkbox" id="chkLunch" onchange="calcEndTime(); saveStateToBrowser()"> 점심적용</label>
+            </div>
+            <div class="input-group" style="margin-top:auto;">
+                <span class="label-fixed">종료시간</span> 
+                <input type="text" id="calcEndTimeDisplay" readonly style="background:#eee;">
+            </div>
+        </div>
+
+        <div class="section" id="sec_holiday">
+           <div class="section-title">⛔ 3. 휴강일 
+                <div style="float:right; display:flex; gap:2px;">
+                    <button onclick="exportHolidays()" style="font-size:0.6rem; padding:2px 5px; background:#3498db; color:white; border:none; border-radius:3px;">💾 텍스트 저장</button>
+                    <button onclick="clearHolidays()" style="font-size:0.6rem; padding:2px 5px; background:#e74c3c; color:white; border:none; border-radius:3px;">삭제</button>
+                </div>
+            </div>
+            <div class="input-group">
+                <input type="date" id="holidayInput">
+                <button class="btn-add" onclick="addHoliday()" style="float:none;">+</button>
+            </div>
+            <div class="file-box" style="margin-top:5px; padding:2px; background:#fff5f5; border-color:#e74c3c;">
+                <span class="file-label">📄 휴강일 파일(.txt)</span>
+                <input type="file" id="holidayFile" accept=".txt" onclick="this.value=null" onchange="loadHolidayFile(this)">
+            </div>
+            <div class="scroll-list" id="holidayList"></div>
+        </div>
+
+        <div class="section" id="sec_file">
+            <div class="section-title">💾 4. 데이터 로드</div>
+            <div class="file-box" style="border-color: #2980b9; background: #f0f8ff;">
+                <span class="file-label" style="color:#e74c3c">① RD 파일 (1순위)</span>
+                <input type="file" id="rdFile" accept=".xls,.xlsx,.csv" onclick="this.value=null" onchange="loadRDFile(this)">
+                <div id="rdStatus">파일 없음</div>
+            </div>
+            <div class="file-box">
+                <span class="file-label">② 코드 파일 (2순위)</span>
+                <input type="file" id="codeFile" accept=".xls,.xlsx" onclick="this.value=null" onchange="loadCodeFile(this)">
+                <div class="input-group" style="margin-top:2px;">
+                    <span style="font-size:0.7rem; width:30px;">강사</span>
+                    <select id="baseInstructor" style="font-size:0.7rem;" onchange="checkBaseInstructorValidity(); saveStateToBrowser()"><option value="">(코드파일필요)</option></select>
+                </div>
+                <div class="input-group" style="margin-top:2px;">
+                    <span style="font-size:0.7rem; width:30px;">장소</span>
+                    <select id="baseRoom" style="font-size:0.7rem;" onchange="saveStateToBrowser()"><option value="">(코드파일필요)</option></select>
+                </div>
+            </div>
+        </div>
+
+        <div class="section" id="sec_ex">
+            <div class="section-title" style="color:#16a085;">🛠️ 6. 예외 일정 설정</div>
+            <div class="input-group">
+                <input type="date" id="exStartDate" style="width:40%" placeholder="시작" onchange="saveStateToBrowser()">
+                <span id="waveMark">~</span>
+                <input type="date" id="exEndDate" style="width:40%" placeholder="종료" onchange="saveStateToBrowser()">
+                <label style="font-size:0.7rem; margin-left:5px; cursor:pointer;">
+                    <input type="checkbox" id="exSingleDay" onchange="toggleExSingle(this); saveStateToBrowser()"> 1일
+                </label>
+            </div>
+            
+            <div class="pattern-btn-group" style="margin-top:5px;">
+                <button class="btn-pattern" onclick="setPattern('ex', 'WEEKDAY')">월-금</button>
+                <button class="btn-pattern" onclick="setPattern('ex', 'MWF')">월수금</button>
+                <button class="btn-pattern" onclick="applyBiWeekly('ex', 'MWF', 'MW')">월수금/월수</button>
+                <button class="btn-pattern" onclick="setPattern('ex', 'TTF')">화목금</button>
+                <button class="btn-pattern" onclick="applyBiWeekly('ex', 'TTF', 'TT')">화목금/화목</button>
+                <button class="btn-pattern" onclick="setPattern('ex', 'SAT')">토요일</button>
+            </div>
+
+            <div class="week-pattern-box" style="background:#fff; border-color:#1abc9c;">
+                <div class="day-selector" id="exWeek1Days">
+                    <label><input type="checkbox" value="1" checked>월</label>
+                    <label><input type="checkbox" value="2" checked>화</label>
+                    <label><input type="checkbox" value="3" checked>수</label>
+                    <label><input type="checkbox" value="4" checked>목</label>
+                    <label><input type="checkbox" value="5" checked>금</label>
+                    <label><input type="checkbox" value="6">토</label>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-top:2px;">
+                    <span style="color:#16a085; font-size:0.65rem;">(2주차)</span>
+                    <label style="font-size:0.65rem;"><input type="checkbox" id="exChkSamePattern" checked onchange="toggleExWeek2(this)"> 동일</label>
+                </div>
+                <div class="day-selector" id="exWeek2Days" style="opacity: 0.5; pointer-events: none;">
+                    <label><input type="checkbox" value="1" checked>월</label>
+                    <label><input type="checkbox" value="2" checked>화</label>
+                    <label><input type="checkbox" value="3" checked>수</label>
+                    <label><input type="checkbox" value="4" checked>목</label>
+                    <label><input type="checkbox" value="5" checked>금</label>
+                    <label><input type="checkbox" value="6">토</label>
+                </div>
+            </div>
+
+            <div style="background:#f0f9f8; padding:3px; border-radius:3px; border:1px solid #b2dfdb; margin-top:5px;">
+                <div class="input-group" style="margin-bottom:3px;">
+                    <span class="label-fixed" style="width:40px;">유형</span>
+                    <select id="exType" style="font-weight:bold; color:#16a085;" onchange="toggleExTimeInputs()">
+                        <option value="FULL_CHANGE">🕒 시간/기간 변경 (하루 총량 변화)</option>
+                        <option value="SHIFT_TIME">🚚 시작시간만 이동 (총량 유지)</option>
+                        <option value="PART">🧩 구간 대체 (기본틀 유지)</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <span class="label-fixed" style="width:40px;">시간</span>
+                    <input type="text" id="exStartTime" placeholder="0900" style="width:40px;">
+                    <input type="number" id="exDuration" placeholder="H" step="0.1" style="width:40px;">H
+                </div>
+            </div>
+
+            <div style="background:#fff3e0; padding:3px; border-radius:3px; border:1px solid #ffe0b2; margin-top:3px;">
+                <div class="input-group" style="justify-content:space-between;">
+                    <span class="label-fixed" style="width:60px; font-size:0.7rem;">점심 커스텀</span>
+                    <label style="font-size:0.7rem;"><input type="checkbox" id="exLunchChk" onchange="toggleExLunch(this, 'chk')">적용</label>
+                    <label style="font-size:0.7rem; color:#c0392b;"><input type="checkbox" id="exNoLunch" onchange="toggleExLunch(this, 'no')">점심없음</label>
+                </div>
+                <div class="input-group">
+                    <input type="text" id="exLunchStart" placeholder="1230" style="width:45%;">~
+                    <input type="text" id="exLunchEnd" placeholder="1300" style="width:45%;">
+                </div>
+            </div>
+
+            <div class="input-group" style="margin-top:4px;">
+                <span class="label-fixed">강사/장소</span>
+                <select id="exInstructor" style="width:45%"><option value="">(유지)</option></select>
+                <select id="exRoom" style="width:45%"><option value="">(유지)</option></select>
+            </div>
+            <div class="input-group">
+                <span class="label-fixed">과목변경</span>
+                <select id="exSubject"><option value="">(기본값 유지)</option></select>
+            </div>
+            
+            <button class="btn-add" onclick="addException()" style="width:100%; margin-top:2px;">+ 예외 적용 추가</button>
+            <div class="scroll-list" id="exceptionList" style="margin-top:5px;"></div>
+        </div>
+
+        <div class="section" id="sec_list" style="flex: 2; min-width: 300px;">
+            <div class="section-title">
+                📚 5. 교과목 리스트 
+                <span style="font-weight:normal; font-size:0.8rem; margin-left:10px;">(합계: <span id="subjTotal" style="color:blue; font-weight:bold;">0</span>H)</span> 
+                <button class="btn-add" onclick="addSubject()">+ 추가</button>
+            </div>
+            <div class="subject-grid" id="subjGrid">
+                <div class="grid-header">
+                    <div class="cell header-cell" style="width: 40px;">전환<div class="resizer"></div></div>
+                    <div class="cell header-cell" style="width: 350px;">교과목명<div class="resizer"></div></div>
+                    <div class="cell header-cell" style="width: 60px;">시간<div class="resizer"></div></div>
+                    <div class="cell header-cell" style="width: 50px;">이동<div class="resizer"></div></div>
+                    <div class="cell header-cell" style="width: 40px;">삭제</div>
+                </div>
+                <div class="grid-body" id="subjListBody"></div>
+            </div>
+            <div id="validationPanel"></div>
+        </div>
+        
+    </div> <div class="grid-container" id="mainGrid">
+        <div class="grid-header">
+            <div class="cell header-cell bg-blue" style="width:300px; border-right:1px solid #555;">일자별 시간표 내역을 입력합니다</div>
+            <div class="cell header-cell bg-pink" style="flex:1;">교시별 세부 시간표 내역을 입력합니다</div>
+        </div>
+        <div class="grid-header" id="resultHeader">
+            <div class="cell header-cell bg-gray" style="width:100px;">훈련일자<div class="resizer"></div></div>
+            <div class="cell header-cell bg-gray" style="width:100px;">훈련시작<div class="resizer"></div></div>
+            <div class="cell header-cell bg-gray" style="width:100px;">훈련종료<div class="resizer"></div></div>
+            <div class="cell header-cell bg-gray" style="width:70px;">방학<div class="resizer"></div></div>
+            <div class="cell header-cell bg-gray" style="width:100px;">시작시간<div class="resizer"></div></div>
+            <div class="cell header-cell bg-gray" style="width:60px;">구분<div class="resizer"></div></div>
+            <div class="cell header-cell bg-gray" style="width:150px;">훈련강사코드<div class="resizer"></div></div>
+            <div class="cell header-cell bg-gray" style="width:500px;">장소코드<div class="resizer"></div></div>
+            <div class="cell header-cell bg-gray" style="width:930px;">교과목코드<div class="resizer"></div></div>
+        </div>
+        <div class="grid-body" id="resultBody"></div>
+    </div>
+
+    <div style="display: flex; gap: 5px; margin: 5px 10px 10px 10px; overflow-x: auto;">
+        <div class="section" style="width: 230px; flex-shrink: 0; background: #e8f5e9; border-color: green; padding: 4px; height: auto;">
+            <div class="section-title" style="color:green; font-size: 0.8rem; margin-bottom: 2px; cursor:pointer;" onclick="loadTarget('아이티_그래픽과정', 'sel_graphic')">
+                🖥️ 그래픽 (클릭)
+            </div>
+            <select id="sel_graphic" style="width:100%; height: 24px; font-size: 0.8rem;" onchange="applySelection(this)">
+                <option value="">▼ 선택</option>
+            </select>
+        </div>
+
+        <div class="section" style="width: 230px; flex-shrink: 0; background: #e8f5e9; border-color: #2e7d32; padding: 4px; height: auto;">
+            <div class="section-title" style="color:#2e7d32; font-size: 0.8rem; margin-bottom: 2px; cursor:pointer;" onclick="loadTarget('아이티_OA과정', 'sel_oa')">
+                📄 OA과정 (클릭)
+            </div>
+            <select id="sel_oa" style="width:100%; height: 24px; font-size: 0.8rem;" onchange="applySelection(this)">
+                <option value="">▼ 선택</option>
+            </select>
+        </div>
+
+        <div class="section" style="width: 230px; flex-shrink: 0; background: #e8f5e9; border-color: #1b5e20; padding: 4px; height: auto;">
+            <div class="section-title" style="color:#1b5e20; font-size: 0.8rem; margin-bottom: 2px; cursor:pointer;" onclick="loadTarget('IMD_과정', 'sel_imd')">
+                📱 IMD과정 (클릭)
+            </div>
+            <select id="sel_imd" style="width:100%; height: 24px; font-size: 0.8rem;" onchange="applySelection(this)">
+                <option value="">▼ 선택</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="shortcutModal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); width:400px; background:white; border:2px solid #333; box-shadow:0 0 10px rgba(0,0,0,0.5); z-index:9999; padding:15px; border-radius:5px;">
+        <h3 style="margin-top:0; border-bottom:1px solid #ccc; padding-bottom:5px;">⌨️ 단축키 설정 (커스텀)</h3>
+        <div id="shortcutList" style="max-height:400px; overflow-y:auto; margin-bottom:10px;"></div>
+        <div style="text-align:right; border-top:1px solid #eee; padding-top:10px;">
+            <button onclick="ShortcutManager.resetDefault()" style="float:left; background:#e74c3c; color:white; border:none; padding:5px 10px; border-radius:3px;">초기화</button>
+            <button onclick="document.getElementById('shortcutModal').style.display='none'" style="background:#95a5a6; color:white; border:none; padding:5px 10px; border-radius:3px;">닫기</button>
+            <button onclick="ShortcutManager.saveAndClose()" style="background:#27ae60; color:white; border:none; padding:5px 10px; border-radius:3px;">저장</button>
+        </div>
+    </div>
+
+    <button class="btn-floating-settings" onclick="ShortcutManager.openModal()" title="단축키 설정 (F2)">⚙️</button>
+    <a href="https://calendar.naver.com/" target="_blank" class="btn-floating-naver">🗓️ 네이버 달력</a>
+    <a href="<?= SpreadsheetApp.getActiveSpreadsheet().getUrl() ?>" target="_blank" class="btn-floating-sheet">📊 구글 시트 열기</a>
+
+    <div id="toast-container"></div>
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div>잠시만 기다려주세요... ⏳</div>
+    </div>
+    <script>
+    // --- 전역 변수 ---
+    // =========================================================
+    // 0. 전역 변수 및 시스템 초기화
+    // =========================================================
+    
+    let prevStartDate = "";
+    let prevStartTime = "";
+    let instructorOpts = [], roomOpts = [], subjectOpts = [];
+    let isCodeLoaded = false;
+    let rdDataMap = {}; 
+    let rdDataList = []; 
+    let finalGridData = [];
+    let holidays = new Set(); 
+    let exceptions = []; 
+    let isScheduleValid = false;
+    let subjectRules = {}; 
+    let currentSheetName = ""; 
+    let savedProjName = "";
+
+    // ★ 구글 시트 원본 백업용 변수
+    let loadedOriginalStartDate = ""; 
+    let loadedOriginalStartTime = ""; 
+    let loadedOriginalDuration = "";  
+
+    // 서버(GAS)에서 시트 URL을 미리 받아와서 안전하게 저장해둡니다.
+    const MY_SHEET_URL = "<?= SpreadsheetApp.getActiveSpreadsheet().getUrl() ?>";
+
+    // ★ Undo / Redo (타임머신) 전용 변수
+    let historyStack = [];      // 과거 상태들을 저장할 배열
+    let historyIndex = -1;      // 현재 내가 위치한 시간대
+    const MAX_HISTORY = 30;     // 최대 30단계까지 기억
+    let isUndoRedoAction = false; // 타임머신 탑승 중복 방지용 플래그
+    let historyTimeout = null; // ★ 신규: 연속 촬영 방지용 타이머
+    let pendingSheetUndo = null; // ★ 수퍼 실행취소용 스냅샷 임시 저장소
+    let pendingSheetRedo = null;
+
+    // ---------------------------------------------------------
+    // [UI 유틸] 토스트 알림 (Toast Notification)
+    // ---------------------------------------------------------
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        
+        // 타입별 아이콘 설정
+        let icon = '💡';
+        if (type === 'success') icon = '✅';
+        if (type === 'error') icon = '🚨';
+        if (type === 'warning') icon = '⚠️';
+
+        toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+        container.appendChild(toast);
+
+        // 3초 뒤에 HTML에서 완전히 삭제 (메모리 정리)
+        setTimeout(() => {
+            if (container.contains(toast)) {
+                container.removeChild(toast);
+            }
+        }, 3000);
+    }
+
+    // ---------------------------------------------------------
+    // [UI 유틸] 로딩 화면 제어
+    // ---------------------------------------------------------
+    function showLoading() {
+        document.getElementById('loading-overlay').style.display = 'flex';
+    }
+    function hideLoading() {
+        document.getElementById('loading-overlay').style.display = 'none';
+    }
+
+    // =========================================================
+    // 1. 페이지 로드 및 초기화 (window.onload)
+    // =========================================================
+    window.onload = function() {
+        console.log("🚀 페이지 로드 시작"); 
+
+        const now = new Date();
+        const offset = now.getTimezoneOffset() * 60000;
+        const today = new Date(now - offset).toISOString().slice(0, 10);
+        
+        const startInput = document.getElementById('startDate');
+        const startTimeInput = document.getElementById('dailyStartTime');
+
+        // (1) 기본값 세팅
+        if(startInput) startInput.value = today;
+
+        // (2) 저장된 데이터(레이아웃 및 내용) 불러오기
+        restoreLayoutState(); 
+        loadStateFromBrowser(); 
+        
+        // ★ [핵심] 로드 직후, 현재 화면에 보이는 값을 '이전 값(prev)'으로 확정
+        if(startInput) prevStartDate = startInput.value;
+        if(startTimeInput) prevStartTime = startTimeInput.value;
+
+        calcEndTime();
+        toggleExTimeInputs();
+        // 페이지가 다 켜지고 0.5초 뒤에 초기 상태를 타임머신 출발점으로 기록!
+        setTimeout(() => { saveStateToBrowser(); }, 500);
+
+        // (3) 레이아웃 매니저 및 리사이저 초기화
+        LayoutManager.init();
+        initResizers('subjGrid');
+        initResizers('mainGrid');
+
+        // (4) 폼 변경 시 자동 저장 리스너 등록
+        document.querySelectorAll('input[type=checkbox], input[type=date], select').forEach(c => {
+            c.addEventListener('change', saveStateToBrowser);
+        });
+        document.querySelectorAll('input[type=text], input[type=number]').forEach(c => {
+            c.addEventListener('input', saveStateToBrowser);
+        });
+        
+        // (5) 날짜 변경 감지 로직 (예외일정 동기화)
+        if(startInput) {
+            startInput.addEventListener('change', function() {
+                const newDate = this.value;
+                if (!prevStartDate || !newDate || prevStartDate === newDate) {
+                    prevStartDate = newDate; 
+                    return;
+                }
+                const workDays = getCheckedDays('week1Days'); 
+                if(workDays.length === 0) { 
+                    showToast("요일 설정을 먼저 진행해주세요.", "warning");
+                    this.value = prevStartDate; 
+                    return; 
+                }
+                
+                // 예외 일정이 있을 경우 이동 여부 확인
+                if (exceptions.length > 0) {
+                    if (window.confirm(`개강일이 변경되었습니다.\n[ ${prevStartDate} ] → [ ${newDate} ]\n\n등록된 예외일정 ${exceptions.length}건도 함께 이동시킬까요?`)) {
+                        
+                        // ★ 이동 방식 선택
+                        const isPatternMode = !window.confirm(`[이동 방식 선택]\n\n🔵 [확인] = 수업회차 유지\n❌ [취소] = 요일/패턴 유지`);
+                        const d1 = new Date(prevStartDate);
+                        const d2 = new Date(newDate);
+                        const diff = Math.round((d2 - d1) / (1000 * 3600 * 24));
+
+                        // 내부 헬퍼 함수
+                        function addCalDays(s, n) { const d=new Date(s); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+                        function getWDiff(s, e) {
+                            let c=0, curr=new Date(s), fin=new Date(e);
+                            if(curr>fin) return -getWDiff(e,s);
+                            while(curr<=fin) {
+                                if(workDays.includes(curr.getDay()) && !holidays.has(curr.toISOString().slice(0,10))) c++;
+                                curr.setDate(curr.getDate()+1);
+                            }
+                            return c;
+                        }
+                        function addWDays(s, n) {
+                            let curr=new Date(s);
+                            while(!workDays.includes(curr.getDay()) || holidays.has(curr.toISOString().slice(0,10))) curr.setDate(curr.getDate()+1);
+                            let steps=n>0?n-1:0;
+                            while(steps>0) {
+                                curr.setDate(curr.getDate()+1);
+                                if(workDays.includes(curr.getDay()) && !holidays.has(curr.toISOString().slice(0,10))) steps--;
+                            }
+                            return curr.toISOString().slice(0,10);
+                        }
+
+                        // 예외 일정 순회 및 변경
+                        exceptions.forEach(ex => {
+                            if (isPatternMode) {
+                                ex.start = addCalDays(ex.start, diff);
+                                if(ex.end) ex.end = addCalDays(ex.end, diff);
+                            } else {
+                                if (ex.start >= prevStartDate) {
+                                    let off = getWDiff(prevStartDate, ex.start);
+                                    let dur = getWDiff(ex.start, ex.end||ex.start);
+                                    ex.start = addWDays(newDate, off);
+                                    ex.end = addWDays(ex.start, dur);
+                                } else {
+                                    ex.start = addCalDays(ex.start, diff);
+                                    if(ex.end) ex.end = addCalDays(ex.end, diff);
+                                }
+                            }
+                        });
+                        renderExceptions();
+                        showToast("예외 일정이 재조정되었습니다.", "info");
+                    }
+                }
+                prevStartDate = newDate;
+                saveStateToBrowser();
+            });
+        }
+
+        // (6) 시간 변경 감지 로직 (예외일정 동기화)
+        if(startTimeInput) {
+            startTimeInput.addEventListener('change', function() {
+                const newTime = this.value;
+                if (!prevStartTime || !newTime || prevStartTime === newTime || newTime.length !== 4) {
+                    prevStartTime = newTime; 
+                    calcEndTime(); 
+                    saveStateToBrowser(); 
+                    return;
+                }
+                const toMin = (t) => parseInt(t.slice(0,2))*60 + parseInt(t.slice(2));
+                const toStr = (m) => {
+                    let h=Math.floor(m/60), n=m%60; if(h>=24) h-=24;
+                    return String(h).padStart(2,'0')+String(n).padStart(2,'0');
+                };
+                
+                const diffM = toMin(newTime) - toMin(prevStartTime);
+                const targets = exceptions.filter(ex => ex.startTime && ex.startTime.length === 4);
+
+                if (targets.length > 0 && diffM !== 0) {
+                    if (window.confirm(`시작시간이 ${diffM}분 변경되었습니다.\n시간이 고정된 예외일정(${targets.length}건)도 같이 이동시킬까요?`)) {
+                        targets.forEach(ex => {
+                            ex.startTime = toStr(toMin(ex.startTime) + diffM);
+                        });
+                        renderExceptions();
+                        showToast("예외 일정 시간이 변경되었습니다.", "success");
+                    }
+                }
+                prevStartTime = newTime; 
+                calcEndTime(); 
+                saveStateToBrowser();
+            });
+        }
+    };
+
+    // =========================================================
+    // 2. 휴강일 파일 로드
+    // =========================================================
+    function loadHolidayFile(input) {
+        if (!input.files[0]) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const text = e.target.result;
+            const matches = text.match(/\d{8}/g);
+            let count = 0;
+            if(matches) {
+                matches.forEach(n => {
+                    const y = n.substring(0,4), m = n.substring(4,6), d = n.substring(6,8);
+                    const dateStr = `${y}-${m}-${d}`;
+                    if(!holidays.has(dateStr)) {
+                        holidays.add(dateStr);
+                        count++;
+                    }
+                });
+            }
+            if(typeof renderHolidays === 'function') renderHolidays(); 
+            if(typeof saveStateToBrowser === 'function') saveStateToBrowser();
+            showToast(count + "건의 휴강일이 로드되었습니다.", "info");
+        };
+        reader.readAsText(input.files[0]);
+    }
+
+    // =========================================================
+    // 3. 구글 시트 연동 로직 (3분할 콤보박스)
+    // =========================================================
+    
+    var currentRowsData = { sel_graphic: [], sel_oa: [], sel_imd: [] };
+    const sheetMap = { 'sel_graphic': '아이티_그래픽과정', 'sel_oa': '아이티_OA과정', 'sel_imd': 'IMD_과정' };
+
+    // (1) 단일 시트 로드
+    function loadTarget(sheetName, selectId) {
+        var sel = document.getElementById(selectId);
+        sel.innerHTML = "<option>데이터 불러오는 중...</option>";
+        var isChecked = document.getElementById('chkLunch') ? document.getElementById('chkLunch').checked : false;
+        
+        google.script.run
+            .withSuccessHandler(function(res) { fillDropdown(res, selectId); })
+            .getSheetData(sheetName, isChecked);
+    }
+
+    // (2) 3개 시트 동시 로드
+    function loadAllTargets() {
+        loadTarget('아이티_그래픽과정', 'sel_graphic');
+        loadTarget('아이티_OA과정', 'sel_oa');
+        loadTarget('IMD_과정', 'sel_imd');
+    }
+
+    // (3) 드롭다운 채우기 (과정별 그룹핑)
+    function fillDropdown(res, selectId) {
+        if (!res) return;
+        currentRowsData[selectId] = res.rows; 
+        var sel = document.getElementById(selectId);
+        sel.innerHTML = '<option value="">▼ 과정을 선택하세요</option>';
+        
+        var currentGroupName = "";
+        var optgroup = null;
+
+        res.rows.forEach((row, idx) => {
+            var originalText = row[0]; // 원본 과정명
+            var groupName = originalText.replace(/\s*\(\d+회차?\)$/, "").trim();
+            if (!groupName) groupName = "기타 과정";
+
+            var zColumnData = row[7]; // ★ Z열 (백업 데이터)
+            var mColumnData = row[8]; // M열 (BJN 데이터)
+
+            var fullText = originalText;
+
+            // =========================================================
+            // ★ [신규 추가] Z열에 백업 데이터가 없으면 꼬리표 달기!
+            // (JSON 데이터는 보통 길이가 길기 때문에 10자 미만이면 없는 것으로 간주)
+            if (!zColumnData || String(zColumnData).trim().length < 10) {
+                fullText += " (데이터없음)";
+            }
+            // =========================================================
+
+            if (groupName !== currentGroupName) {
+                optgroup = document.createElement('optgroup');
+                optgroup.label = "📁 " + groupName;
+                sel.appendChild(optgroup);
+                currentGroupName = groupName;
+            }
+
+            var opt = document.createElement('option');
+            opt.value = idx;        
+            opt.text = fullText; 
+            
+            // 🎨 M열에 뭔가 지시사항 글자가 적혀있다면 색칠하기!
+            if (mColumnData && String(mColumnData).trim() !== "") {
+                opt.style.color = '#e74c3c';           
+                opt.style.fontWeight = 'bold';         
+                opt.style.backgroundColor = '#fff5f5'; 
+                opt.text = "🚨 " + fullText;           
+            }
+            
+            if (optgroup) optgroup.appendChild(opt);
+            else sel.appendChild(opt);
+        });
+
+        var parentBox = sel.closest('.section');
+        parentBox.style.boxShadow = "0 0 10px yellow";
+        setTimeout(() => parentBox.style.boxShadow = "", 500);
+    }
+
+    // (4) 드롭다운 선택 시 데이터 적용
+    function applySelection(selectElement) {
+        
+        // 1. 다른 드롭다운 초기화
+        ['sel_graphic', 'sel_oa', 'sel_imd'].forEach(id => {
+            if (id !== selectElement.id) document.getElementById(id).value = "";
+        });
+
+        var idx = selectElement.value;
+        if (idx === "") return;
+        
+        var targetArray = currentRowsData[selectElement.id]; 
+        var row = targetArray[idx];
+        if (!row) return;
+
+        currentSheetName = sheetMap[selectElement.id]; 
+
+        // 2. 시트 데이터 추출
+        var sheetName = row[0];        
+        var sheetStartDate = row[1];   
+        var sheetStartTime = row[2];   
+        var sheetDuration = row[3];    
+        var sheetRound = row[6];       
+        var savedJson = row[7];        // Z열 (백업)
+        var mColumnData = row[8];      // M열 (BJN)
+
+        // 3. 원본 정보 백업
+        loadedOriginalStartDate = sheetStartDate; 
+        loadedOriginalStartTime = sheetStartTime; 
+        loadedOriginalDuration = sheetDuration;   
+
+        // 4. M열 지시사항 알림창 처리
+        const bjnAlert = document.getElementById('bjnAlert');
+        const bjnMsg = document.getElementById('bjnMessage');
+        const chkClearM = document.getElementById('chkClearM');
+        
+        if (bjnAlert) {
+            if(mColumnData && String(mColumnData).trim() !== "") {
+                bjnAlert.style.display = "block";
+                bjnMsg.innerText = String(mColumnData);
+                chkClearM.checked = true;
+            } else {
+                bjnAlert.style.display = "none";
+            }
+        }
+
+        // 5. Z열 작업 백업 데이터 확인 및 충돌 감지
+        if (savedJson && savedJson.length > 10) {
+            try {
+                var savedState = JSON.parse(savedJson);
+                var savedStartDate = savedState.startDate;
+                var savedStartTime = savedState.dailyStartTime;
+
+                var isDateDiff = (sheetStartDate && savedStartDate && sheetStartDate !== savedStartDate);
+                var isTimeDiff = (sheetStartTime && savedStartTime && sheetStartTime !== savedStartTime);
+
+                if (isDateDiff || isTimeDiff) {
+                    var msg = "⚠️ [데이터 불일치 감지] ⚠️\n\n";
+                    msg += "구글시트 원본 데이터가 저장된 작업 데이터(Z열)와 다릅니다.\n어느 데이터를 기준으로 불러올까요?\n\n";
+                    msg += "📅 [구글시트 원본 (B~M열)]\n - 시작일: " + sheetStartDate + "\n - 시간: " + sheetStartTime + "\n\n";
+                    msg += "💾 [저장된 작업데이터 (Z열)]\n - 시작일: " + savedStartDate + "\n - 시간: " + savedStartTime + "\n\n";
+                    msg += "--------------------------------------\n";
+                    msg += "🔵 [확인] = 저장된 작업데이터(Z열) 불러오기 (추천)\n";
+                    msg += "❌ [취소] = 구글시트 원본으로 초기화 (작업내역 무시)";
+
+                    if (confirm(msg)) {
+                        applyState(savedState);
+                        showToast(" 저장된 작업 데이터(Z열)를 불러왔습니다.", "success");
+                        return; // 여기서 종료 (아래 원본 덮어쓰기 안함)
+                    } 
+                } else {
+                    if(confirm("☁️ 저장된 작업 데이터(Z열)가 있습니다. 불러오시겠습니까?")) {
+                        applyState(savedState);
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.error("JSON 파싱 오류", e);
+                showToast("저장된 데이터가 손상되었습니다. 원본 데이터로 엽니다.", "error");
+            }
+        }
+
+        // 6. 원본 데이터(B~M열) 화면에 적용
+        var fullName = sheetName || "";
+        var cleanName = fullName.replace(/\s*\(\d+회차?\)$/, "").trim();
+        if(typeof savedProjName !== 'undefined') savedProjName = cleanName; 
+        
+        // ★ [버그 픽스] 이 한 줄이 빠져서 엉뚱한 곳을 지우고 있었습니다!
+        document.getElementById('projName').value = cleanName; 
+        document.getElementById('startDate').value = sheetStartDate;
+        if(sheetStartDate) prevStartDate = sheetStartDate; 
+        
+        if(sheetRound) {
+            var rRaw = String(sheetRound);
+            var rNum = rRaw.replace(/[^0-9]/g, ""); 
+            document.getElementById('projRound').value = rNum ? (rNum + "회") : rRaw;
+        }
+        
+        if(sheetStartTime) {
+            document.getElementById('dailyStartTime').value = sheetStartTime; 
+            prevStartTime = sheetStartTime;
+        }
+        
+        // 7. 지능형 훈련시간 적용 (점심 차감 여부 확인)
+        if(sheetDuration) {
+            var rawDur = parseFloat(sheetDuration); 
+            var isLunchChecked = document.getElementById('chkLunch').checked; 
+            
+            var lsRaw = document.getElementById('lunchStart').value || "1230";
+            var leRaw = document.getElementById('lunchEnd').value || "1300";
+            var lsm = parseInt(lsRaw.slice(0,2))*60 + parseInt(lsRaw.slice(2));
+            var lem = parseInt(leRaw.slice(0,2))*60 + parseInt(leRaw.slice(2));
+            var lunchDurHours = (lem - lsm) / 60; 
+
+            var sm = parseInt(sheetStartTime.slice(0,2))*60 + parseInt(sheetStartTime.slice(2)); 
+            var totalEndM = sm + (rawDur * 60);
+
+            if (isLunchChecked && !isNaN(rawDur) && sm < lsm && totalEndM > lsm) {
+                document.getElementById('dailyDuration').value = (rawDur - lunchDurHours).toFixed(1);
+            } else {
+                document.getElementById('dailyDuration').value = sheetDuration;
+            }
+        }
+        
+        if(typeof calcEndTime === 'function') calcEndTime();
+        if(typeof saveStateToBrowser === 'function') saveStateToBrowser();
+        
+        // 8. 훈련시간 입력칸 깜빡임 효과
+        var durInput = document.getElementById('dailyDuration');
+        durInput.style.backgroundColor = "#d4edda"; 
+        setTimeout(function() { 
+            durInput.style.backgroundColor = ""; 
+            
+            // ★ 추가: 구글 시트에서 데이터를 다 불러오고 깜빡임까지 끝나면 즉시 찰칵!
+            saveStateToBrowser(true); 
+        }, 1000);
+    }
+    // =========================================================
+    // 4. 레이아웃 (화면 간격) 저장 및 복구
+    // =========================================================
+    
+    function saveLayoutState() {
+        const layout = {
+            topPanelHeight: document.getElementById('topPanel').style.height,
+            sec_proj: getSecSize('sec_proj'),
+            sec_date: getSecSize('sec_date'),
+            sec_time: getSecSize('sec_time'),
+            sec_holiday: getSecSize('sec_holiday'),
+            sec_file: getSecSize('sec_file'),
+            sec_ex: getSecSize('sec_ex'),
+            sec_list: getSecSize('sec_list')
+        };
+        localStorage.setItem('hrd_layout_v3', JSON.stringify(layout));
+    }
+
+    function getSecSize(id) { 
+        const el = document.getElementById(id); 
+        return el ? { w: el.style.width, h: el.style.height } : null; 
+    }
+
+    function restoreLayoutState() {
+        const saved = localStorage.getItem('hrd_layout_v3');
+        if(!saved) return;
+        
+        try {
+            const l = JSON.parse(saved);
+            if(l.topPanelHeight) document.getElementById('topPanel').style.height = l.topPanelHeight;
+            applySecSize('sec_proj', l.sec_proj);
+            applySecSize('sec_date', l.sec_date);
+            applySecSize('sec_time', l.sec_time);
+            applySecSize('sec_holiday', l.sec_holiday);
+            applySecSize('sec_file', l.sec_file);
+            applySecSize('sec_ex', l.sec_ex);
+            applySecSize('sec_list', l.sec_list);
+        } catch(e) { 
+            console.log("레이아웃 복구 실패", e); 
+        }
+    }
+
+    function applySecSize(id, size) { 
+        if(!size) return; 
+        const el = document.getElementById(id); 
+        if(el) { 
+            if(size.w) el.style.width = size.w; 
+            if(size.h) el.style.height = size.h; 
+        } 
+    }
+
+    // =========================================================
+    // 5. 공통 유틸리티 함수
+    // =========================================================
+
+    // 분(minute)을 HHmm 문자열로 변환
+    function fmtTime(m) { 
+        let h = Math.floor(m / 60);
+        let min = Math.floor(m % 60); 
+        return String(h).padStart(2, '0') + String(min).padStart(2, '0'); 
+    }
+
+    // 회차 입력 시 자동으로 "회" 붙여주기
+    function formatRound(input) { 
+        let val = input.value.trim(); 
+        if (val && /^\d+$/.test(val)) { 
+            input.value = val + "회"; 
+            saveStateToBrowser(); 
+        } 
+    }
+    
+    // =========================================================
+    // 6. 그리드 리사이저 (칸 너비 조절 기능)
+    // =========================================================
+    
+    function initResizers(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        
+        const resizers = container.querySelectorAll('.resizer');
+        let currentResizer, startX, startWidth;
+
+        resizers.forEach(resizer => {
+            resizer.addEventListener('mousedown', function(e) {
+                currentResizer = e.target;
+                startX = e.clientX;
+                startWidth = currentResizer.parentElement.getBoundingClientRect().width;
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            });
+        });
+
+        function onMouseMove(e) {
+            if (!currentResizer) return;
+            const newWidth = Math.max(30, startWidth + (e.clientX - startX));
+            // 드래그 중에는 헤더만 조절 (성능 위해)
+            currentResizer.parentElement.style.width = newWidth + 'px';
+            currentResizer.parentElement.style.flex = "none"; 
+        }
+
+        function onMouseUp() {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            currentResizer = null;
+            
+            if (typeof LayoutManager !== 'undefined') {
+                LayoutManager.syncGridBody(); 
+            }
+            // ★ 드래그 끝나면 레이아웃 변경 내용을 타임머신에 강제로 찰칵!
+            saveStateToBrowser(true); 
+        }
+    }
+    // =========================================================
+    // ★ [신규] 날짜 클립보드 복사 함수 (HRD 행정망 입력용)
+    // =========================================================
+    function copyDate(elementId) {
+        const el = document.getElementById(elementId);
+        if (!el || !el.value) {
+            showToast("복사할 날짜가 없습니다.", "warning");
+            return;
+        }
+        
+        // 종강일의 "2026-04-24 (금)" 형태에서 순수 날짜 "2026-04-24" 10자리만 딱 잘라냄
+        const dateText = el.value.substring(0, 10); 
+        
+        // 구글 스크립트(Iframe) 환경에서도 100% 작동하는 안전한 복사 로직
+        const tempTextArea = document.createElement("textarea");
+        tempTextArea.value = dateText;
+        document.body.appendChild(tempTextArea);
+        tempTextArea.select();
+        
+        try {
+            document.execCommand('copy');
+            showToast(`📋 [ ${dateText} ] 복사 완료!`, "success");
+        } catch (err) {
+            showToast("복사 실패: 브라우저 권한을 확인해주세요.", "error");
+        }
+        
+        document.body.removeChild(tempTextArea);
+    }
+
+    // =========================================================
+    // 7. 메인 스케줄 렌더링 (화면 그리기)
+    // =========================================================
+
+    function renderGridFromRows(rows) {
+        const body = document.getElementById('resultBody'); 
+        body.innerHTML = "";
+        
+        // 1. 헤더에서 현재 설정된 너비 스타일 가져오기
+        const headers = document.querySelectorAll('#resultHeader .cell');
+        const styles = Array.from(headers).map(h => ({
+            w: h.style.width, 
+            f: h.style.flex
+        }));
+
+        // 2. 각 줄(Row) 생성
+        rows.forEach(r => {
+            const d = document.createElement('div');
+            
+            if(r.isSeparator) {
+                // 구분선(빈 줄)
+                d.className = 'grid-row separator-row';
+                d.innerHTML = Array(9).fill(0).map(()=>`<div class="cell"></div>`).join('');
+            } else if(r.isBlank) { 
+                // 블랭크(공백 처리 줄)
+                d.className = 'grid-row blank-row';
+                d.innerHTML = Array(9).fill(0).map(()=>`<div class="cell"></div>`).join('');
+            } else {
+                // 정상 데이터 줄
+                d.className = 'grid-row';
+                // 텍스트를 <input> 태그로 감싸 사용자가 직접 수정 가능하도록 설정
+                d.innerHTML = `
+                    <div class="cell"><input type="text" value="${(r.date || '').replace(/-/g,"")}"></div>
+                    <div class="cell"><input type="text" value="${r.dayStartStr || ''}"></div>
+                    <div class="cell"><input type="text" value="${r.dayEndStr || ''}"></div>
+                    <div class="cell"><input type="text" value="" placeholder=""></div>
+                    <div class="cell"><input type="text" value="${r.start || ''}"></div>
+                    <div class="cell"><input type="text" value="${r.type || ''}"></div>
+                    <div class="cell">${r.type == 2 ? "" : mkSelHtml(instructorOpts, r.inst)}</div>
+                    <div class="cell">${r.type == 2 ? "" : mkSelHtml(roomOpts, r.room)}</div>
+                    <div class="cell">${r.type == 2 ? "" : mkSelHtml(subjectOpts, r.subj)}</div>
+                `;
+                
+                // 생성된 셀들에 미리 가져온 헤더의 너비 스타일 즉시 주입
+                const cells = d.querySelectorAll('.cell');
+                cells.forEach((c, i) => {
+                    if(styles[i]) {
+                        c.style.width = styles[i].w;
+                        c.style.flex = styles[i].f;
+                        c.style.flexShrink = "0"; // 브라우저 창이 좁아져도 찌그러짐 방지
+                    }
+                });
+            }
+            body.appendChild(d);
+        });
+        
+        finalGridData = rows;
+        
+        // 안전장치: 전체 렌더링이 끝나면 다시 한번 셀 너비 동기화
+        if(typeof LayoutManager !== 'undefined') {
+            LayoutManager.syncGridBody();
+        }
+    }
+
+    // =========================================================
+    // 8. 상태 저장 (수퍼 타임머신 무결성 픽스 버전)
+    // =========================================================
+    function saveStateToBrowser(isForce = false) { 
+        try {
+            const state = collectCurrentState();
+            const stateString = JSON.stringify(state);
+            
+            if (!isUndoRedoAction) { 
+                const takeSnapshot = () => {
+                    if (historyIndex >= 0) {
+                        let currentObj = JSON.parse(historyStack[historyIndex]);
+                        let stateObj = JSON.parse(stateString);
+                        
+                        delete currentObj.sheetActionUndo;
+                        delete currentObj.sheetActionRedo;
+                        let stateObjCompare = Object.assign({}, stateObj);
+                        delete stateObjCompare.sheetActionUndo;
+                        delete stateObjCompare.sheetActionRedo;
+                        
+                        // 화면만 똑같고 시트 작업이 없는 빈 껍데기 사진은 버림
+                        if (JSON.stringify(currentObj) === JSON.stringify(stateObjCompare)) {
+                            if (!state.sheetActionUndo) return; 
+                        }
+                    }
+                    
+                    if (historyIndex < historyStack.length - 1) {
+                        historyStack = historyStack.slice(0, historyIndex + 1);
+                    }
+                    historyStack.push(stateString); 
+                    if (historyStack.length > MAX_HISTORY) historyStack.shift();
+                    else historyIndex = historyStack.length - 1;
+                    
+                    localStorage.setItem('hrd_scheduler_v134_state', historyStack[historyIndex]);
+                };
+
+                if (isForce) {
+                    clearTimeout(historyTimeout);
+                    takeSnapshot();
+                } else {
+                    clearTimeout(historyTimeout); 
+                    historyTimeout = setTimeout(takeSnapshot, 300);
+                }
+            }
+        } catch(e) { 
+            console.warn("Local storage error:", e); 
+        }
+    }
+
+    function resetAll() {
+        if(!confirm("모든 데이터를 초기화하시겠습니까?")) return;
+        
+        // 1. 저장소 비우기
+        localStorage.removeItem('hrd_scheduler_v134_state');
+        localStorage.removeItem('hrd_layout_v3');
+        
+        // 2. 기본 입력 폼 비우기
+        document.getElementById('projName').value = "";
+        document.getElementById('projRound').value = "1회";
+        document.getElementById('targetTotalHours').value = "0";
+        document.getElementById('dailyStartTime').value = "0930";
+        document.getElementById('dailyDuration').value = ""; 
+        document.getElementById('lunchStart').value = "1230";
+        document.getElementById('lunchEnd').value = "1300";
+        document.getElementById('chkLunch').checked = false;
+        
+        // 오늘 날짜로 초기화
+        const now = new Date();
+        const offset = now.getTimezoneOffset() * 60000;
+        const today = new Date(now - offset).toISOString().slice(0, 10);
+        document.getElementById('startDate').value = today;
+        prevStartDate = today; 
+        
+       // 요일 초기화
+        setCheckedDays('week1Days', [1,2,3,4,5]);
+        setCheckedDays('week2Days', [1,2,3,4,5]);
+        document.getElementById('chkSamePattern').checked = true;
+        toggleWeek2(document.getElementById('chkSamePattern'));
+        
+        // ★ [추가] 예외 일정 요일도 월~금으로 초기화
+        setCheckedDays('exWeek1Days', [1,2,3,4,5]);
+        setCheckedDays('exWeek2Days', [1,2,3,4,5]);
+        document.getElementById('exChkSamePattern').checked = true;
+        toggleExWeek2(document.getElementById('exChkSamePattern'));
+        
+        // 리스트 비우기
+        document.getElementById('subjListBody').innerHTML = "";
+        document.getElementById('holidayList').innerHTML = "";
+        document.getElementById('exceptionList').innerHTML = "";
+        document.getElementById('resultBody').innerHTML = "";
+        
+        // 무결성 검증 패널 완벽 제거
+        const vPanel = document.getElementById('validationPanel');
+        if (vPanel) {
+            vPanel.innerHTML = "";      
+            vPanel.style.display = "none"; 
+            vPanel.className = "";      
+        }
+        
+        // 파일 입력 초기화
+        document.getElementById('rdStatus').innerText = "파일 없음";
+        document.getElementById('rdFile').value = "";
+        document.getElementById('codeFile').value = "";
+        document.getElementById('holidayFile').value = "";
+        document.getElementById('projFile').value = "";
+        
+        // 기타 표시 및 알림창 비우기
+        const endDisp = document.getElementById('calcEndDateDisplay');
+        if(endDisp) endDisp.value = "";
+        
+        const bjnAlert = document.getElementById('bjnAlert');
+        if(bjnAlert) {            
+            bjnAlert.style.display = 'none';            
+            document.getElementById('bjnMessage').innerText = "";            
+            document.getElementById('chkClearM').checked = true;        
+        }
+        
+        // 3. 내부 변수 비우기 (구글 시트 연동 데이터 완벽 초기화)
+        loadedOriginalStartDate = ""; 
+        loadedOriginalStartTime = ""; 
+        loadedOriginalDuration = "";  
+        currentSheetName = ""; 
+        savedProjName = "";
+        holidays = new Set();
+        exceptions = [];
+        rdDataList = [];
+        finalGridData = [];
+        instructorOpts = []; 
+        roomOpts = []; 
+        subjectOpts = [];
+        isCodeLoaded = false;
+        
+        fillSel('baseInstructor', []);
+        fillSel('baseRoom', []);
+        fillSel('exInstructor', []);
+        fillSel('exRoom', []);
+        fillSel('exSubject', []);
+        
+        calcEndTime();
+        updTotal();
+        
+        // =========================================================
+        // 🧹 4. [맞춤형 완벽 리셋] 시트 드롭다운 초기화 & 시트 리로드
+        // =========================================================
+        // 1) 3분할 드롭다운(그래픽, OA, IMD)을 '선택' 상태로 되돌리기
+        if (document.getElementById('sel_graphic')) document.getElementById('sel_graphic').value = "";
+        if (document.getElementById('sel_oa')) document.getElementById('sel_oa').value = "";
+        if (document.getElementById('sel_imd')) document.getElementById('sel_imd').value = "";
+        
+        // 2) 3개 시트의 최신 데이터를 한 번에 다시 불러오기 (이미 만들어두신 함수 호출!)
+        if (typeof loadAllTargets === 'function') {
+            loadAllTargets(); 
+        }
+        // =========================================================
+        
+        showToast("초기화 및 시트 데이터를 새로 불러옵니다!", "info");
+        
+        // ★ 타임머신에 텅 빈 상태를 즉시 기록!
+        saveStateToBrowser(true);
+    }
+
+    // =========================================================
+    // 9. UI 토글 및 옵션 제어 함수
+    // =========================================================
+
+    // (예외일정) 1일 체크박스 제어
+    function toggleExSingle(chk) { 
+        const endInp = document.getElementById('exEndDate'); 
+        const wave = document.getElementById('waveMark'); 
+        if(chk.checked) { 
+            endInp.style.display = 'none'; 
+            wave.style.display = 'none'; 
+            endInp.value = ''; 
+        } else { 
+            endInp.style.display = ''; 
+            wave.style.display = ''; 
+        } 
+    }
+
+    // (예외일정) 예외 유형에 따른 시간/기간 입력칸 제어
+    function toggleExTimeInputs() { 
+        const type = document.getElementById('exType').value; 
+        const st = document.getElementById('exStartTime'); 
+        const dur = document.getElementById('exDuration'); 
+        
+        if(type === 'FULL_CHANGE') { 
+            st.disabled = false; st.placeholder = "0900"; 
+            dur.disabled = false; dur.placeholder = "H"; 
+        } else if (type === 'SHIFT_TIME') { 
+            st.disabled = false; st.placeholder = "0900"; 
+            dur.disabled = true; dur.value = ""; dur.placeholder = "자동(8H)"; 
+        } else { 
+            st.disabled = false; st.placeholder = "0900"; 
+            dur.disabled = false; dur.placeholder = "H"; 
+        } 
+    }
+
+    // (예외일정) 점심시간 옵션 제어 (배타적 체크)
+    function toggleExLunch(chk, type) { 
+        const chkCustom = document.getElementById('exLunchChk'); 
+        const chkNo = document.getElementById('exNoLunch'); 
+        
+        if(type === 'chk' && chk.checked) { 
+            chkNo.checked = false; 
+        } else if (type === 'no' && chk.checked) { 
+            chkCustom.checked = false; 
+        } 
+    }
+
+    // (공통) 셀렉트 박스에 옵션 채워넣기
+    function fillSel(id, list) { 
+        const sel = document.getElementById(id); 
+        if(!sel) return; 
+        
+        const currentVal = sel.value; 
+        sel.innerHTML = '<option value="">선택</option>'; 
+        
+        list.forEach(item => { 
+            const opt = document.createElement('option'); 
+            opt.value = item; 
+            opt.text = item; 
+            sel.appendChild(opt); 
+        }); 
+        
+        if(list.includes(currentVal)) sel.value = currentVal; 
+    }
+
+    // (공통) 선택된 값을 가진 동적 HTML <select> 문자열 생성
+    function mkSelHtml(l, v) { 
+        let h = `<select class="subj-name-input" onchange="autoFill(this); saveStateToBrowser()"><option value="">선택</option>`; 
+        l.forEach(o => h += `<option value="${o}" ${o === v ? 'selected' : ''}>${o}</option>`); 
+        if (v && !l.includes(v)) h += `<option value="${v}" selected>${v}</option>`; 
+        return h + `</select>`; 
+    }
+
+    // (교과목) 텍스트 입력 <-> 드롭다운 전환 토글
+    function toggleType(b) { 
+        const c = b.closest('.grid-row').children[1];
+        const v = c.querySelector('input,select').value; 
+        
+        if (c.querySelector('select')) {
+            c.innerHTML = `<input type="text" class="subj-name-input" value="${v}" oninput="saveStateToBrowser()">`; 
+        } else { 
+            if (!isCodeLoaded) { 
+                showToast("코드 파일이 필요합니다.", "warning"); 
+                return; 
+            } 
+            c.innerHTML = mkSelHtml(subjectOpts, v); 
+            c.querySelector('select').addEventListener('change', function() { 
+                autoFill(this); 
+                saveStateToBrowser();
+            }); 
+        } 
+        saveStateToBrowser(); 
+    }
+
+    // (교과목) 총 시간 합계 계산 업데이트
+    function updTotal() { 
+        let s = 0; 
+        document.querySelectorAll('#subjListBody .subj-hour').forEach(e => s += Number(e.value)); 
+        document.getElementById('subjTotal').innerText = s; 
+    }
+
+    // (교과목) 리스트 순서 이동 (위/아래)
+    function moveRow(btn, direction) { 
+        const row = btn.closest('.grid-row'); 
+        const container = document.getElementById('subjListBody'); 
+        
+        if (direction === -1) { 
+            if (row.previousElementSibling) container.insertBefore(row, row.previousElementSibling); 
+        } else { 
+            if (row.nextElementSibling) container.insertBefore(row.nextElementSibling, row); 
+        } 
+        saveStateToBrowser(); 
+    }
+
+    // (더미 함수 - 필요 시 확장)
+    function validateInstructor(selectEl) { const row = selectEl.closest('.grid-row'); if(!row) return; }
+    function checkBaseInstructorValidity() { }
+
+
+    // =========================================================
+    // 10. 휴강일 관리 (Holidays)
+    // =========================================================
+
+    function addHoliday() { 
+        const v = document.getElementById('holidayInput').value; 
+        if(v && !holidays.has(v)) {
+            holidays.add(v);
+            renderHolidays();
+            saveStateToBrowser();
+        } 
+    }
+
+    // 등록된 휴강일을 .txt 파일로 다운로드
+    function exportHolidays() {
+        if (holidays.size === 0) {
+            showToast("다운로드할 휴강일 데이터가 없습니다.", "warning");
+            return;
+        }
+        // 날짜 정렬 및 YYYYMMDD 형태로 변환
+        const holidayArr = Array.from(holidays).sort().map(dateStr => {
+            return dateStr.replace(/-/g, ""); 
+        });
+        const textContent = holidayArr.join('\n');
+        const blob = new Blob([textContent], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        
+        a.style.display = "none";
+        a.href = url;
+        const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        a.download = `휴강일_백업_${todayStr}.txt`;
+        
+        document.body.appendChild(a);
+        a.click();
+        
+        setTimeout(() => {
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }, 100);
+    }
+
+    function removeHoliday(d) { 
+        holidays.delete(d); 
+        renderHolidays(); 
+        saveStateToBrowser(); 
+    }
+
+    function clearHolidays() { 
+        if(confirm("휴강일 목록을 전체 삭제하시겠습니까?")) {
+            holidays.clear();
+            renderHolidays();
+            saveStateToBrowser();
+        } 
+    }
+
+    function renderHolidays() { 
+        const l = document.getElementById('holidayList'); 
+        l.innerHTML = ""; 
+        Array.from(holidays).sort().forEach(d => {
+            l.innerHTML += `
+                <div class="holiday-item">
+                    <span>${d}</span>
+                    <button class="del-btn" style="width:auto" onclick="removeHoliday('${d}')">x</button>
+                </div>`;
+        }); 
+    }
+
+
+    // =========================================================
+    // 11. 예외 일정 관리 (Exceptions)
+    // =========================================================
+
+    function addException() { 
+        const s = document.getElementById('exStartDate').value; 
+        let e = document.getElementById('exEndDate').value; 
+        const isSingle = document.getElementById('exSingleDay').checked; 
+        
+        if(isSingle) e = s; 
+        else if(!e) e = s; 
+        
+        const type = document.getElementById('exType').value; 
+        const st = document.getElementById('exStartTime').value; 
+        const dur = document.getElementById('exDuration').value; 
+        const inst = document.getElementById('exInstructor').value; 
+        const room = document.getElementById('exRoom').value; 
+        const subj = document.getElementById('exSubject').value; 
+        const lunchCustom = document.getElementById('exLunchChk').checked; 
+        const noLunch = document.getElementById('exNoLunch').checked; 
+        const lStart = document.getElementById('exLunchStart').value; 
+        const lEnd = document.getElementById('exLunchEnd').value; 
+        const w1Days = getCheckedDays('exWeek1Days'); 
+        
+        let w2Days = []; 
+        if(document.getElementById('exChkSamePattern').checked) w2Days = [...w1Days]; 
+        else w2Days = getCheckedDays('exWeek2Days'); 
+        
+        // 유효성 검사
+        if(!s) { showToast("시작일을 입력하세요", "warning"); return; } 
+        if(w1Days.length === 0 && w2Days.length === 0) { showToast("요일 최소 하나 선택", "warning"); return; } 
+        if(lunchCustom && (!lStart || !lEnd)) { showToast("커스텀 점심시간을 입력하세요", "warning"); return; } 
+        
+        exceptions.push({ 
+            start: s, end: e, type: type, startTime: st, duration: dur, 
+            instructor: inst, room: room, subjectCode: subj, 
+            week1Days: w1Days, week2Days: w2Days, 
+            lunchCustom: lunchCustom, noLunch: noLunch, lunchStart: lStart, lunchEnd: lEnd 
+        }); 
+        
+        renderExceptions(); 
+        saveStateToBrowser(); 
+    }
+
+    function removeException(idx) { 
+        exceptions.splice(idx, 1); 
+        renderExceptions(); 
+        saveStateToBrowser(); 
+    }
+
+    function renderExceptions() { 
+        const el = document.getElementById('exceptionList'); 
+        el.innerHTML = ""; 
+        const dayNames = ["일","월","화","수","목","금","토"]; 
+        
+        exceptions.forEach((ex, i) => { 
+            let info = `${ex.start}`; 
+            if(ex.start !== ex.end) info += `~${ex.end}`; 
+            
+            const w1Str = (ex.week1Days || []).map(d=>dayNames[d]).join(""); 
+            const w2Str = (ex.week2Days || []).map(d=>dayNames[d]).join(""); 
+            
+            if(w1Str === w2Str) info += ` [${w1Str}]`; 
+            else info += ` [1/2주:${w1Str}]`; 
+            
+            let tagColor = '#95a5a6'; let tagName = '기타'; 
+            if(ex.type === 'FULL_CHANGE') { tagColor = '#e74c3c'; tagName = '시간변경'; } 
+            else if(ex.type === 'SHIFT_TIME') { tagColor = '#f39c12'; tagName = '시간이동'; } 
+            else if(ex.type === 'PART') { tagColor = '#3498db'; tagName = '구간대체'; } 
+            
+            let extra = ""; 
+            if(ex.type !== 'SHIFT_TIME' && ex.duration) extra += ` / ${ex.duration}H`; 
+            if(ex.startTime) extra += ` / ${ex.startTime}시작`; 
+            if(ex.noLunch) extra += ` / ❌점심없음`; 
+            else if(ex.lunchCustom) extra += ` / 🍱점심:${ex.lunchStart}~${ex.lunchEnd}`; 
+            
+            el.innerHTML += ` 
+                <div class="exception-item"> 
+                    <div style="display:flex; justify-content:space-between; align-items:center;"> 
+                        <div> 
+                            <span class="exception-tag" style="background:${tagColor}">${tagName}</span> 
+                            <span style="font-weight:bold; font-size:0.75rem;">예외 ${i+1}</span> 
+                        </div> 
+                        <button class="del-btn" style="width:auto; padding:0 4px;" onclick="removeException(${i})">x</button> 
+                    </div> 
+                    <div class="exception-info">${info} ${extra}</div> 
+                </div>`; 
+        }); 
+    }
+
+
+    // =========================================================
+    // 12. 패턴(요일) 관리 시스템
+    // =========================================================
+
+    function getCheckedDays(containerId) { 
+        return Array.from(document.querySelectorAll(`#${containerId} input:checked`)).map(cb => parseInt(cb.value)); 
+    }
+
+    function setCheckedDays(containerId, daysArr) { 
+        document.querySelectorAll(`#${containerId} input`).forEach(cb => { 
+            cb.checked = daysArr.includes(parseInt(cb.value)); 
+        }); 
+    }
+
+    // 단일 패턴 적용 시 1주차와 2주차 체크박스를 모두 동일하게 덮어씌움
+    function setPattern(mode, type) { 
+        const id1 = mode === 'base' ? 'week1Days' : 'exWeek1Days'; 
+        const id2 = mode === 'base' ? 'week2Days' : 'exWeek2Days'; 
+        const chkId = mode === 'base' ? 'chkSamePattern' : 'exChkSamePattern'; 
+        
+        document.getElementById(chkId).checked = true; 
+        
+        // ★ [버그 픽스] base(1번)일 때는 toggleWeek2, ex(6번)일 때는 toggleExWeek2를 정확히 호출!
+        if(mode === 'base') toggleWeek2(document.getElementById(chkId)); 
+        else toggleExWeek2(document.getElementById(chkId)); 
+        
+        let days = []; 
+        if(type === 'WEEKDAY') days = [1,2,3,4,5]; 
+        else if(type === 'MWF') days = [1,3,5]; 
+        else if(type === 'TTF') days = [2,4,5]; 
+        else if(type === 'SAT') days = [6]; 
+        
+        setCheckedDays(id1, days); 
+        setCheckedDays(id2, days); 
+        
+        saveStateToBrowser(); 
+    }
+
+    // (패턴) 1/2주차 교차 패턴(월수금/월수 등) 적용
+    function applyBiWeekly(mode, p1, p2) { 
+        const id1 = mode === 'base' ? 'week1Days' : 'exWeek1Days'; 
+        const id2 = mode === 'base' ? 'week2Days' : 'exWeek2Days'; 
+        const chkId = mode === 'base' ? 'chkSamePattern' : 'exChkSamePattern'; 
+        
+        document.getElementById(chkId).checked = false; 
+        
+        // ★ [버그 픽스] 여기도 정확히 분리 호출
+        if(mode === 'base') toggleWeek2(document.getElementById(chkId)); 
+        else toggleExWeek2(document.getElementById(chkId)); 
+        
+        let d1 = [], d2 = []; 
+        if(p1 === 'MWF') d1 = [1,3,5]; 
+        if(p1 === 'TTF') d1 = [2,4,5]; 
+        if(p2 === 'MW') d2 = [1,3]; 
+        if(p2 === 'TT') d2 = [2,4]; 
+        
+        setCheckedDays(id1, d1); 
+        setCheckedDays(id2, d2); 
+        
+        saveStateToBrowser(); 
+    }
+
+    // (패턴) 기본 2주차 동일 여부 체크박스 토글
+    function toggleWeek2(chk) { 
+        const w2 = document.getElementById('week2Days'); 
+        if (chk.checked) { 
+            w2.style.opacity = "0.5"; 
+            w2.style.pointerEvents = "none"; 
+        } else { 
+            w2.style.opacity = "1"; 
+            w2.style.pointerEvents = "auto"; 
+        } 
+        saveStateToBrowser(); 
+    }
+
+    // (패턴) 예외일정 2주차 동일 여부 체크박스 토글
+    function toggleExWeek2(chk) { 
+        const w2 = document.getElementById('exWeek2Days'); 
+        if (chk.checked) { 
+            w2.style.opacity = "0.5"; 
+            w2.style.pointerEvents = "none"; 
+        } else { 
+            w2.style.opacity = "1"; 
+            w2.style.pointerEvents = "auto"; 
+        } 
+    }
+
+
+    // =========================================================
+    // 13. 교과목 관리 로직
+    // =========================================================
+
+    // 새로운 교과목 리스트에 추가 (추가 직후 레이아웃 동기화)
+    function addSubject(n = "", h = "") { 
+        const b = document.getElementById('subjListBody'); 
+        const r = document.createElement('div'); 
+        r.className = 'grid-row'; 
+        
+        // 1. 입력 방식 결정 (코드가 로드되었으면 셀렉트박스, 아니면 텍스트박스)
+        let inputHtml = ""; 
+        if (isCodeLoaded && subjectOpts.length > 0) { 
+            inputHtml = mkSelHtml(subjectOpts, n); 
+        } else { 
+            inputHtml = `<input type="text" class="subj-name-input" value="${n}" oninput="saveStateToBrowser()">`; 
+        } 
+        
+        // 2. HTML 구조 삽입 (너비는 LayoutManager가 나중에 맞춤)
+        r.innerHTML = ` 
+            <div class="cell">
+                <button class="toggle-btn" onclick="toggleType(this)">⇄</button>
+            </div> 
+            <div class="cell">${inputHtml}</div> 
+            <div class="cell">
+                <input type="number" class="subj-hour" value="${h}" oninput="updTotal(); saveStateToBrowser()">
+            </div> 
+            <div class="cell"> 
+                <button class="move-btn" onclick="moveRow(this, -1)">▲</button> 
+                <button class="move-btn" onclick="moveRow(this, 1)">▼</button> 
+            </div> 
+            <div class="cell">
+                <button class="del-btn" onclick="this.closest('.grid-row').remove(); updTotal(); saveStateToBrowser()">X</button>
+            </div> 
+        `; 
+        b.appendChild(r); 
+        
+        // 3. 셀렉트 박스일 경우 이벤트 리스너(NCS 자동입력 등) 부착
+        const s = r.querySelector('select'); 
+        if (s) {
+            s.addEventListener('change', function() { 
+                autoFill(this); 
+                saveStateToBrowser(); 
+            }); 
+        }
+        
+        // 4. 합계 계산 및 상태 저장
+        updTotal(); 
+        saveStateToBrowser(); 
+        
+        // ★ [핵심] 추가된 줄의 너비를 상단 헤더와 즉시 동기화
+        if(typeof LayoutManager !== 'undefined') {
+            LayoutManager.syncGridBody();
+        }
+    }
+
+    // =========================================================
+    // 14. 데이터 파일 (코드/RD) 파싱 로직
+    // =========================================================
+
+    // (1) 코드 파일 (.xlsx) 로드 및 파싱 (강사/장소/교과목)
+    function loadCodeFile(input) { 
+        if (!input.files[0]) return; 
+        
+        const r = new FileReader(); 
+        r.onload = e => { 
+            try { 
+                const wb = XLSX.read(e.target.result, {type: 'array'}); 
+                const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1}); 
+                
+                // 초기화
+                instructorOpts = []; roomOpts = []; subjectOpts = []; subjectRules = {}; 
+                let gubunCol = -1, codeCol = -1; 
+                
+                // 헤더(컬럼 위치) 찾기
+                for(let i = 0; i < Math.min(rows.length, 5); i++) { 
+                    for(let j = 0; j < rows[i].length; j++) { 
+                        const cell = String(rows[i][j]).trim(); 
+                        if(cell === "구분") gubunCol = j; 
+                        if(cell === "코드") codeCol = j; 
+                    } 
+                } 
+                if(gubunCol === -1) gubunCol = 0; 
+                if(codeCol === -1) codeCol = 4; 
+                
+                let currentSection = "", lastSection = ""; 
+                
+                // 데이터 분류
+                rows.forEach(row => { 
+                    let colA = (row[gubunCol] || "").toString().trim(); 
+                    const colE = (row[codeCol] || "").toString().trim(); 
+                    const colD = (row[3] || "").toString().trim(); 
+                    
+                    if (colA !== "") { 
+                        if (colA.includes("강사")) currentSection = "instr"; 
+                        else if (colA.includes("시설")) currentSection = "room"; 
+                        else if (colA.includes("교과목") || colA.includes("전공") || colA.includes("NCS")) currentSection = "subject"; 
+                        lastSection = currentSection; 
+                    } else { 
+                        currentSection = lastSection; 
+                    } 
+                    
+                    if (!colE) return; 
+                    
+                    if(currentSection === "instr") instructorOpts.push(colE); 
+                    else if(currentSection === "room") roomOpts.push(colE); 
+                    else if(currentSection === "subject") { 
+                        subjectOpts.push(colE); 
+                        if(colD) subjectRules[colE] = [colD.replace(/\[.*?\]/g, "").trim()]; 
+                    } 
+                }); 
+                
+                // UI(셀렉트 박스)에 반영
+                fillSel('baseInstructor', instructorOpts); 
+                fillSel('baseRoom', roomOpts); 
+                fillSel('exInstructor', instructorOpts); 
+                fillSel('exRoom', roomOpts); 
+                fillSel('exSubject', subjectOpts); 
+                isCodeLoaded = true; 
+                
+                // 기존 추가된 교과목 목록도 셀렉트 박스로 변환
+                document.querySelectorAll('#subjListBody .grid-row').forEach(row => { 
+                    const nameCell = row.children[1]; 
+                    const val = nameCell.querySelector('input, select').value; 
+                    nameCell.innerHTML = mkSelHtml(subjectOpts, val); 
+                    nameCell.querySelector('select').addEventListener('change', function() { 
+                        autoFill(this); 
+                        validateInstructor(this); 
+                        saveStateToBrowser(); 
+                    }); 
+                }); 
+                
+                saveStateToBrowser(); 
+                showToast("코드 로드 완료! (" + subjectOpts.length + "개 교과목)", "success"); 
+            } catch (err) { 
+                showToast("오류: " + err.message, "error"); 
+            } 
+        }; 
+        r.readAsArrayBuffer(input.files[0]); 
+    }
+
+    // (2) RD 파일 (.xls, .xlsx, .csv) 로드 및 파싱 (교과목 시간 추출)
+    function loadRDFile(input) { 
+        if (!input.files[0]) return; 
+        
+        const r = new FileReader(); 
+        r.onload = e => { 
+            try { 
+                const data = new Uint8Array(e.target.result); 
+                const wb = XLSX.read(data, {type: 'array'}); 
+                const sheet = wb.Sheets[wb.SheetNames[0]]; 
+                const rows = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: ""}); 
+                
+                // 초기화
+                rdDataList = []; 
+                let grandTotal = 0; let projNameFound = ""; 
+                let timeColIndex = -1, theoryColIndex = -1, practiceColIndex = -1, unitColIndex = -1; 
+                let lastSubjectName = ""; 
+                
+                // 주변 셀 값 스캔 헬퍼 함수
+                function getNearbyValue(row, centerIdx) { 
+                    if (centerIdx === -1) return 0; 
+                    const candidates = [0, 1, -1, 2, -2, 3, -3]; 
+                    for (let offset of candidates) { 
+                        const idx = centerIdx + offset; 
+                        if (idx < 0 || idx >= row.length) continue; 
+                        const val = parseFloat(String(row[idx]).replace(/,/g, "")); 
+                        if (!isNaN(val) && val > 0 && val < 2000) return val; 
+                    } 
+                    return 0; 
+                } 
+                
+                // 줄(Row) 단위 탐색
+                for(let i = 0; i < rows.length; i++) { 
+                    const row = rows[i]; 
+                    if(!row || row.length === 0) continue; 
+                    
+                    const rowStr = row.map(x => String(x).replace(/[\r\n]+/g, " ").trim()).join(" "); 
+                    
+                    // 주 교과목명 기억
+                    let currentSubj = String(row[1] || "").trim(); 
+                    if(currentSubj.length > 1 && !currentSubj.includes("교과목") && !currentSubj.includes("조회된") && !currentSubj.includes("NCS") && !currentSubj.includes("비 NCS") && !currentSubj.includes("교과(실기)")) { 
+                        lastSubjectName = currentSubj; 
+                    } 
+                    
+                    // 총 훈련시간 탐색
+                    if(rowStr.includes("총 훈련시간") || rowStr.includes("집체 훈련시간")) { 
+                        for(let k = 0; k < row.length; k++) { 
+                            const v = parseFloat(String(row[k]).replace(/,/g, "")); 
+                            if(!isNaN(v) && v > 10) grandTotal = Math.max(grandTotal, v); 
+                        } 
+                    } 
+                    
+                    // 훈련과정명 탐색
+                    if(rowStr.includes("훈련과정명") && !projNameFound) { 
+                        for(let j = 0; j < row.length; j++) { 
+                            const c = String(row[j]).trim(); 
+                            if(c.length > 5 && !c.includes("훈련과정명")) { 
+                                projNameFound = c; break; 
+                            } 
+                        } 
+                    } 
+                    
+                    // 헤더 컬럼 위치 탐색
+                    let isHeaderRow = false; 
+                    for(let k = 0; k < row.length; k++) { 
+                        const cellText = String(row[k]).replace(/\s/g, ""); 
+                        if(cellText === "편성시간") timeColIndex = k; 
+                        if(cellText === "이론시간") theoryColIndex = k; 
+                        if(cellText === "실기시간") practiceColIndex = k; 
+                        if(cellText === "단원" || cellText === "능력단위" || cellText === "훈련내용") unitColIndex = k; 
+                        if(cellText === "편성시간" || cellText === "이론시간" || cellText === "실기시간") isHeaderRow = true; 
+                    } 
+                    
+                    if(isHeaderRow) continue; 
+                    
+                    // 시간 데이터 추출
+                    let foundTime = 0; 
+                    let valTotal = getNearbyValue(row, timeColIndex); 
+                    let valTheory = getNearbyValue(row, theoryColIndex); 
+                    let valPractice = getNearbyValue(row, practiceColIndex); 
+                    let valSum = valTheory + valPractice; 
+                    foundTime = Math.max(valTotal, valSum); 
+                    
+                    // 유효한 교과목 데이터 저장
+                    if(foundTime > 0) { 
+                        let rawKeywords = row.map(cell => String(cell).replace(/[\r\n]+/g, "").trim()).join(" "); 
+                        let unitName = ""; 
+                        
+                        if(unitColIndex !== -1 && row[unitColIndex]) unitName = String(row[unitColIndex]).trim(); 
+                        else if(row[11]) unitName = String(row[11]).trim(); 
+                        
+                        if(unitName) rawKeywords = unitName + " " + rawKeywords; 
+                        if(rawKeywords.includes("총 훈련시간") || rawKeywords.includes("총 시간")) continue; 
+                        if(lastSubjectName && !rawKeywords.includes(lastSubjectName)) rawKeywords = lastSubjectName + " " + rawKeywords; 
+                        
+                        rdDataList.push({ keywords: rawKeywords, hours: foundTime }); 
+                    } 
+                } 
+                
+                // 데이터 적용 및 UI 업데이트
+                if(grandTotal > 0) document.getElementById('targetTotalHours').value = grandTotal; 
+                if(projNameFound) document.getElementById('projName').value = projNameFound; 
+                
+                document.getElementById('rdStatus').innerText = `✅ 데이터 ${rdDataList.length}건 로드 완료`; 
+                saveStateToBrowser(); 
+                
+                if(rdDataList.length === 0) {
+                    showToast("데이터를 못 찾았습니다. RD파일을 확인해주세요.", "warning"); 
+                } else {
+                    showToast(`RD 로드 성공!<br>과정명: ${projNameFound}<br>총 시간: ${grandTotal}시간<br>교과목 ${rdDataList.length}개 확보.`, "success"); 
+                }
+            } catch(e) { 
+                console.error(e); showToast("RD 파일 처리 중 에러: " + e.message, "error"); 
+            } 
+        }; 
+        r.readAsArrayBuffer(input.files[0]); 
+    }
+
+    // =========================================================
+    // 15. 스케줄 계산 및 검증 도구
+    // =========================================================
+
+    // (자동완성) 코드 선택 시 RD 데이터와 매칭하여 시간 자동 입력
+    function autoFill(e) { 
+        const val = e.value; 
+        if(!val) return; 
+        
+        const parts = val.split("_"); 
+        let matchItem = null; 
+        const ncsCodeRegex = /[0-9]{6,}[a-zA-Z0-9_.-]*/; 
+        const codeMatch = val.match(ncsCodeRegex); 
+        
+        // 1. NCS 코드 매칭
+        if (codeMatch) { 
+            const searchCode = codeMatch[0]; 
+            matchItem = rdDataList.find(item => item.keywords.replace(/\s/g, "").includes(searchCode)); 
+        } 
+        
+        const subjectName = parts.length > 0 ? parts[0].trim() : ""; 
+        const ncsName = parts.length > 1 ? parts[1].trim() : ""; 
+        
+        // 2. 제목 + 단원명 매칭
+        if (!matchItem && subjectName && ncsName) { 
+            matchItem = rdDataList.find(item => item.keywords.includes(subjectName) && item.keywords.includes(ncsName)); 
+        } 
+        
+        // 3. 단원명 단독 매칭
+        if (!matchItem && ncsName && ncsName.length > 1) { 
+            matchItem = rdDataList.find(item => item.keywords.includes(ncsName)); 
+        } 
+        
+        // 4. 주 제목 단독 매칭
+        if (!matchItem && subjectName && subjectName.length > 1) { 
+            matchItem = rdDataList.find(item => item.keywords.includes(subjectName)); 
+        } 
+        
+        // 매칭 성공 시 값 주입 및 시각적 피드백
+        if(matchItem && matchItem.hours > 0) { 
+            const row = e.closest('.grid-row'); 
+            const hourInput = row.querySelector('.subj-hour'); 
+            
+            if(hourInput && hourInput.value != matchItem.hours) { 
+                hourInput.value = matchItem.hours; 
+                hourInput.style.backgroundColor = "#d4edda"; 
+                setTimeout(() => hourInput.style.backgroundColor = "", 1000); 
+                updTotal(); 
+                saveStateToBrowser(); 
+            } 
+        } else { 
+            console.log("매칭 실패: " + val); 
+        } 
+    }
+
+    // 기본 종료 시간 자동 계산 (스마트 분/시간 인식 적용)
+    function calcEndTime() { 
+        const s = document.getElementById('dailyStartTime').value; 
+        let dRaw = parseFloat(document.getElementById('dailyDuration').value) || 0; 
+        
+        // ★ [여기에 추가!] 숫자가 24가 넘어가면 'H'를 '분'으로 실시간 변경
+        const unitSpan = document.getElementById('durUnit');
+        if (unitSpan) {
+            unitSpan.innerText = dRaw > 24 ? "분" : "H";
+            unitSpan.style.color = dRaw > 24 ? "#e67e22" : "#2c3e50"; // 분으로 바뀌면 주황색으로 강조!
+        }
+
+        // ★ 핵심: 24 이상을 입력하면 '분'으로 간주해서 시간으로 쪼갬!
+        let d = dRaw > 24 ? dRaw / 60 : dRaw;
+        
+        const l = document.getElementById('chkLunch').checked; 
+        const ls = document.getElementById('lunchStart').value; 
+        const le = document.getElementById('lunchEnd').value; 
+        
+        if (s.length !== 4 || ls.length !== 4 || le.length !== 4) return; 
+        
+        let sm = parseInt(s.slice(0, 2)) * 60 + parseInt(s.slice(2)); 
+        let lsm = parseInt(ls.slice(0, 2)) * 60 + parseInt(ls.slice(2)); 
+        let lem = parseInt(le.slice(0, 2)) * 60 + parseInt(le.slice(2)); 
+        
+        // ★ 컴퓨터 소수점 오차(189.999) 방지를 위해 Math.round()로 반올림 
+        let em = sm + Math.round(d * 60); 
+        
+        // 점심시간을 가로지르면 점심시간만큼 종료시간 뒤로 밀기
+        if (l && sm < lsm && em > lsm) em += (lem - lsm); 
+        
+        document.getElementById('calcEndTimeDisplay').value = String(Math.floor(em / 60)).padStart(2, '0') + String(em % 60).padStart(2, '0'); 
+    }
+
+    // 스케줄 데이터를 날짜별로 그룹화하고 구분선을 삽입
+    function organizeGroups(rows) { 
+        if(!rows || rows.length === 0) return []; 
+        
+        const realRows = rows.filter(r => !r.isBlank); 
+        const dateMap = {}; 
+        
+        realRows.forEach(r => { 
+            if(!dateMap[r.date]) dateMap[r.date] = []; 
+            dateMap[r.date].push(r); 
+        }); 
+        
+        const groupA = []; 
+        const others = []; 
+        
+        // 날짜별 첫 교시는 groupA로, 나머지는 others로 분리
+        Object.keys(dateMap).sort().forEach(d => { 
+            const events = dateMap[d].sort((a,b) => a.sT - b.sT); 
+            if(events.length > 0) { 
+                groupA.push(events[0]); 
+                for(let i=1; i<events.length; i++) others.push(events[i]); 
+            } 
+        }); 
+        
+        const groupedOthers = {}; 
+        others.forEach(e => { 
+            if(!groupedOthers[e.start]) groupedOthers[e.start] = []; 
+            groupedOthers[e.start].push(e); 
+        }); 
+        
+        const sortedOtherKeys = Object.keys(groupedOthers).sort(); 
+        let displayList = [...groupA]; 
+        
+        // 시간대별로 묶어서 구분선 추가
+        sortedOtherKeys.forEach(k => { 
+            displayList.push({ isSeparator: true }); 
+            const group = groupedOthers[k].sort((a,b) => a.sD - b.sD); 
+            displayList = displayList.concat(group); 
+        }); 
+        
+        return displayList; 
+    }
+
+    // 생성된 스케줄이 목표 시간과 일치하는지 무결성 검증
+    function validateSchedule(rows) { 
+        const panel = document.getElementById('validationPanel'); 
+        panel.innerHTML = ""; 
+        panel.style.display = "flex"; 
+        
+        const targetTotal = parseFloat(document.getElementById('targetTotalHours').value) * 60; 
+        const subjInputs = document.querySelectorAll('#subjListBody .subj-name-input'); 
+        const hourInputs = document.querySelectorAll('#subjListBody .subj-hour'); 
+        const subjMap = {}; 
+        
+        // 목표 시간 수집
+        subjInputs.forEach((el, i) => { 
+            const name = el.value.trim(); 
+            const h = parseFloat(hourInputs[i].value) || 0; 
+            if(name && h > 0) { 
+                if(!subjMap[name]) subjMap[name] = { target: 0, actual: 0 }; 
+                subjMap[name].target += (h * 60); 
+            } 
+        }); 
+        
+        let generatedTotal = 0; 
+        const subjectRows = rows.filter(r => r.type === 1 && !r.isSeparator && !r.isBlank); 
+        
+        // 실제 배정된 시간 합산
+        subjectRows.forEach(r => { 
+            const sM = parseInt(r.start.slice(0,2))*60 + parseInt(r.start.slice(2)); 
+            const eM = parseInt(r.end.slice(0,2))*60 + parseInt(r.end.slice(2)); 
+            let dur = eM - sM; 
+            if(dur < 0) dur += 24*60; 
+            
+            generatedTotal += dur; 
+            if(r.subj && subjMap[r.subj.trim()]) { 
+                subjMap[r.subj.trim()].actual += dur; 
+            } 
+        }); 
+        
+        // 검증 UI 생성
+        let html = `<div style="font-weight:bold; border-bottom:1px solid #ccc; padding-bottom:3px;">📊 무결성 검증 결과</div>`; 
+        const diffTotal = generatedTotal - targetTotal; 
+        const isTotalOk = Math.abs(diffTotal) < 1; 
+        
+        if(!isTotalOk) isScheduleValid = false; 
+        
+        html += `<div class="v-row ${isTotalOk ? 'ok' : 'error'}"> 
+                    <span>총 훈련시간 (${targetTotal/60}H)</span> 
+                    <span>${(generatedTotal/60).toFixed(1)}H (${diffTotal>0?'+':''}${diffTotal/60}H)</span> 
+                 </div>`; 
+                 
+        for(let s in subjMap) { 
+            const t = subjMap[s].target; 
+            const a = subjMap[s].actual; 
+            const diff = a - t; 
+            const isOk = Math.abs(diff) < 1; 
+            let statusClass = isOk ? 'ok' : (isTotalOk ? 'warn' : 'error'); 
+            
+            html += `<div class="v-row ${statusClass}"> 
+                        <span style="font-size:0.7rem; max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${s}</span> 
+                        <span>${(a/60).toFixed(1)} / ${(t/60).toFixed(1)} H</span> 
+                     </div>`; 
+        } 
+        
+        if(isTotalOk) { 
+            isScheduleValid = true; 
+            panel.className = "valid-pass"; 
+            html += `<div style="text-align:center; color:#27ae60; font-weight:bold; margin-top:5px;">✅ 검증 통과 (총 시간 일치)</div>`; 
+            if(document.querySelector('.v-row.warn')) { 
+                html += `<div style="text-align:center; color:#f39c12; font-size:0.7rem;">※ 일부 교과목 변경이 감지되었습니다. (예외적용됨)</div>`; 
+            } 
+        } else { 
+            isScheduleValid = false; 
+            panel.className = "valid-fail"; 
+            html += `<div style="text-align:center; color:#c0392b; font-weight:bold; margin-top:5px;">❌ 검증 실패 (총 시간 불일치)</div>`; 
+        } 
+        
+        panel.innerHTML = html; 
+    }
+    // 이위로 RD
+
+    // =========================================================
+    // 16. 파일 다운로드 유틸리티
+    // =========================================================
+
+    function saveFile(content, defaultName) { 
+        const blob = new Blob([content], {type: "application/octet-stream"}); 
+        const url = URL.createObjectURL(blob); 
+        const a = document.createElement("a"); 
+        
+        a.style.display = "none"; 
+        a.href = url; 
+        a.download = defaultName; 
+        
+        document.body.appendChild(a); 
+        a.click(); 
+        
+        setTimeout(() => { 
+            document.body.removeChild(a); 
+            window.URL.revokeObjectURL(url); 
+        }, 100); 
+    }
+
+    // =========================================================
+    // 17. 단축키 매니저 (ShortcutManager)
+    // =========================================================
+
+    const ShortcutManager = {
+        key: 'HRD_Shortcuts_v2', // v2: 단축키 목록 갱신용
+        
+        // 1. 기본 단축키 설정
+        actions: [
+            { id: "saveProj",   name: "💾 프로젝트 저장",   key: "Ctrl+S",     func: () => saveProjectFile() },
+            { id: "genSch",     name: "⚡ 스케줄 생성",     key: "Ctrl+Enter", func: () => generateSchedule() },
+            { id: "downExcel",  name: "📥 엑셀 다운로드",   key: "Ctrl+E",     func: () => { if(finalGridData.length>0) exportExcel(); else showToast("먼저 생성하세요.", "warning"); } },
+            { id: "loadRD",     name: "📂 RD파일 로드",     key: "Alt+1",      func: () => document.getElementById('rdFile').click() },
+            { id: "loadCode",   name: "📂 코드파일 로드",   key: "Alt+2",      func: () => document.getElementById('codeFile').click() },
+            { id: "loadHoli",   name: "📂 휴강파일 로드",   key: "Alt+3",      func: () => document.getElementById('holidayFile').click() },
+            { id: "loadAllS",   name: "🌩️ 3개 시트 모두 로드", key: "Alt+A",   func: () => loadAllTargets() },
+            { id: "loadS1",     name: "☁️ 시트1 (그래픽)",  key: "Alt+Q",      func: () => loadTarget('아이티_그래픽과정', 'sel_graphic') },
+            { id: "loadS2",     name: "☁️ 시트2 (OA)",      key: "Alt+W",      func: () => loadTarget('아이티_OA과정', 'sel_oa') },
+            { id: "loadS3",     name: "☁️ 시트3 (IMD)",     key: "Alt+E",      func: () => loadTarget('IMD_과정', 'sel_imd') },
+            { id: "masterSave", name: "☁️ 마스터 시트 저장", key: "Alt+S",      func: () => saveToCloud(false) },        
+            { id: "resetData",  name: "🗑️ 데이터 초기화",   key: "Alt+R",      func: () => resetAll() },
+            { id: "resetUI",    name: "🖥️ 화면 초기화",     key: "Alt+U",      func: () => LayoutManager.reset() },
+            { id: "layoutSave", name: "🖥️ 레이아웃 저장",   key: "Alt+D",      func: () => LayoutManager.manualSave() },
+            { id: "layoutLoad", name: "📂 레이아웃 로드",   key: "Alt+F",      func: () => LayoutManager.manualLoad() },
+            { id: "openSheet",  name: "📊 구글 시트 열기",  key: "Alt+G",      func: () => window.open(MY_SHEET_URL, "_blank") },
+            { id: "openNaver",  name: "🗓️ 네이버 달력 열기", key: "Alt+N",      func: () => window.open('https://calendar.naver.com/', '_blank') },
+            { id: "undo",       name: "↩️ 실행 취소",       key: "Ctrl+Z",     func: () => undo() },
+            { id: "redo",       name: "↪️ 다시 실행",       key: "Ctrl+Y",     func: () => redo() },
+            { id: "openSet",    name: "⚙️ 단축키 설정",     key: "F2",         func: () => ShortcutManager.openModal() }        
+        ],
+
+        map: {}, // 실제 매핑 정보
+
+        init: function() {
+            this.load();
+            
+            // 키다운 이벤트 가로채기
+            document.addEventListener('keydown', (e) => {
+                // ★ [추가된 부분] ESC 키를 누르면 단축키 설정 모달 닫기
+                if (e.key === 'Escape') {
+                    const modal = document.getElementById('shortcutModal');
+                    if (modal && modal.style.display === 'block') {
+                        modal.style.display = 'none';
+                        return; // 창만 닫고 함수 종료
+                    }
+                }
+
+                const tag = e.target.tagName;
+                if ((tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') && !e.ctrlKey && !e.altKey && e.key.length === 1) return;
+
+                let combo = [];
+                if (e.ctrlKey) combo.push("Ctrl");
+                if (e.altKey) combo.push("Alt");
+                if (e.shiftKey) combo.push("Shift");
+                
+                let k = e.key;
+                if (k === 'Control' || k === 'Alt' || k === 'Shift') return; 
+                if (k === ' ') k = 'Space';
+                if (k.length === 1) k = k.toUpperCase();
+                
+                combo.push(k);
+                const keyStr = combo.join("+");
+
+                // 등록된 단축키 실행
+                const targetId = Object.keys(this.map).find(id => this.map[id] === keyStr);
+                if (targetId) {
+                    e.preventDefault();
+                    console.log(`🎹 단축키 실행: ${keyStr} -> ${targetId}`);
+                    const actionObj = this.actions.find(a => a.id === targetId);
+                    if (actionObj && actionObj.func) actionObj.func();
+                }
+            });
+            console.log("⚡ ShortcutManager Ready (F2: 설정)");
+        },
+
+        load: function() {
+            const saved = localStorage.getItem(this.key);
+            if (saved) this.map = JSON.parse(saved);
+            else this.resetDefault();
+        },
+
+        resetDefault: function() {
+            this.map = {};
+            this.actions.forEach(a => this.map[a.id] = a.key);
+            this.renderList();
+        },
+
+        openModal: function() {
+            this.renderList();
+            document.getElementById('shortcutModal').style.display = 'block';
+        },
+
+        renderList: function() {
+            const list = document.getElementById('shortcutList');
+            list.innerHTML = "";
+            this.actions.forEach(a => {
+                const currentKey = this.map[a.id] || "";
+                const row = document.createElement('div');
+                row.style.cssText = "display:flex; justify-content:space-between; margin-bottom:5px; align-items:center;";
+                row.innerHTML = `
+                    <span style="font-size:0.9em; font-weight:bold;">${a.name}</span>
+                    <input type="text" class="sc-input" data-id="${a.id}" value="${currentKey}" 
+                           readonly style="width:120px; text-align:center; cursor:pointer; background:#f9f9f9; border:1px solid #ccc;"
+                           onclick="ShortcutManager.waitInput(this)" placeholder="클릭 후 입력">
+                `;
+                list.appendChild(row);
+            });
+        },
+
+        waitInput: function(input) {
+            input.value = "키를 누르세요...";
+            input.style.background = "#fff3cd";
+            
+            const handler = (e) => {
+                e.preventDefault();
+                e.stopPropagation(); 
+
+                // ★ [추가된 부분] 키 입력 대기 중 ESC를 누르면 쿨하게 '취소'하고 원래 키로 복원!
+                if (e.key === 'Escape') {
+                    input.value = this.map[input.dataset.id]; // 원래 저장되어 있던 키로 되돌림
+                    input.style.background = "#f9f9f9";       // 배경색 원상복구
+                    document.removeEventListener('keydown', handler, true);
+                    return;
+                }
+
+                let combo = [];
+                if (e.ctrlKey) combo.push("Ctrl");
+                if (e.altKey) combo.push("Alt");
+                if (e.shiftKey) combo.push("Shift");
+                
+                let k = e.key;
+                if (k === 'Control' || k === 'Alt' || k === 'Shift') return; 
+                if (k === ' ') k = 'Space';
+                if (k.length === 1) k = k.toUpperCase();
+                
+                combo.push(k);
+                const newKey = combo.join("+");
+                
+                const dupId = Object.keys(this.map).find(id => this.map[id] === newKey && id !== input.dataset.id);
+                if (dupId) {
+                    showToast(`⚠️ 이미 [${this.actions.find(a=>a.id===dupId).name}]에 할당된 키입니다!`, "warning");
+                    input.value = this.map[input.dataset.id]; 
+                } else {
+                    input.value = newKey;
+                    this.map[input.dataset.id] = newKey;
+                }
+                
+                input.style.background = "#f9f9f9";
+                document.removeEventListener('keydown', handler, true); 
+            };
+            
+            document.addEventListener('keydown', handler, true);
+        },
+
+        saveAndClose: function() {
+            localStorage.setItem(this.key, JSON.stringify(this.map));
+            document.getElementById('shortcutModal').style.display = 'none';
+            showToast("단축키 설정이 저장되었습니다.", "success");
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        ShortcutManager.init();
+    });
+
+    // =========================================================
+    // 18. 스케줄 자동 생성 핵심 엔진 (Core Engine)
+    // =========================================================
+    
+    function generateSchedule() {
+        finalGridData = []; 
+        document.getElementById('resultBody').innerHTML = ""; 
+        
+        try {
+            // 1. 기본 설정값 불러오기 및 유효성 검사
+            const sDt = document.getElementById('startDate').value;
+            if (!sDt) {
+                showToast("개강일을 먼저 선택해주세요! 📅", "warning");
+                return; 
+            }
+            
+            const globalStartStr = document.getElementById('dailyStartTime').value;
+            
+            // ★ 스마트 분/시간 자동 인식 로직 적용
+            let dRaw = parseFloat(document.getElementById('dailyDuration').value) || 0;
+            const globalDurH = dRaw > 24 ? dRaw / 60 : dRaw;
+            
+            // 목표시간도 소수점 오차 방지를 위해 Math.round 적용
+            const tgt = Math.round(parseFloat(document.getElementById('targetTotalHours').value) * 60) || 0;
+            const lunchGlobalOn = document.getElementById('chkLunch').checked;
+            
+            const globalLunchS = parseInt(document.getElementById('lunchStart').value.slice(0,2))*60 + parseInt(document.getElementById('lunchStart').value.slice(2));
+            const globalLunchE = parseInt(document.getElementById('lunchEnd').value.slice(0,2))*60 + parseInt(document.getElementById('lunchEnd').value.slice(2));
+            
+            const w1Days = getCheckedDays('week1Days');
+            let w2Days = document.getElementById('chkSamePattern').checked ? [...w1Days] : getCheckedDays('week2Days');
+            
+            const baseInst = document.getElementById('baseInstructor').value;
+            const baseRoom = document.getElementById('baseRoom').value;
+
+            if(w1Days.length === 0 && w2Days.length === 0) { showToast("요일 선택 필요", "warning"); return; }
+            if(!globalDurH) { showToast("일일시간 입력 필요", "warning"); return; }
+
+            // 2. 대기열(Queue) 생성 (남은 훈련시간)
+            let queue = [];
+            document.querySelectorAll('#subjListBody .subj-name-input').forEach((el, i) => {
+                const h = parseFloat(document.querySelectorAll('#subjListBody .subj-hour')[i].value) || 0;
+                // ★ 교과목 시간도 소수점 오차 방지
+                if(el.value && h > 0) queue.push({ name: el.value, remain: Math.round(h * 60) });
+            });
+            if(queue.length === 0) { showToast("교과목 추가 필요", "warning"); return; }
+
+            let curDate = new Date(sDt);
+            let startObj = new Date(sDt);
+            let total = 0;
+            let safe = 0;
+            let rawRows = [];
+            
+            let globalStartM = parseInt(globalStartStr.slice(0,2))*60 + parseInt(globalStartStr.slice(2));
+            
+            // ★ 소수점 오차 없이 정확한 '분' 단위로 변환!
+            let globalDurM = Math.round(globalDurH * 60);
+
+            // 3. 스케줄링 메인 루프 시작
+            while(queue.length > 0 && total < tgt && safe++ < 5000) {
+                const ymd = curDate.toISOString().slice(0,10);
+                const day = curDate.getDay();
+                
+                // 휴강일 패스
+                if(holidays.has(ymd)) { 
+                    curDate.setDate(curDate.getDate() + 1); 
+                    continue; 
+                }
+                
+                const diff = Math.floor((curDate - startObj) / (86400000));
+                const weekIdx = Math.floor((diff + startObj.getDay()) / 7);
+                const isOdd = (weekIdx % 2 === 0);
+                const baseDays = isOdd ? w1Days : w2Days;
+                
+                let isBaseWork = baseDays.includes(day);
+                const matchingExceptions = exceptions.filter(e => ymd >= e.start && ymd <= (e.end || e.start));
+                
+                let applyException = false; 
+                let isWork = false; 
+                let targetEx = null;
+                
+                // 예외일정 적용 여부 판단
+                for(let ex of matchingExceptions) {
+                    const exDays = isOdd ? ex.week1Days : ex.week2Days;
+                    if(exDays.includes(day)) { 
+                        applyException = true; 
+                        isWork = true; 
+                        targetEx = ex; 
+                        break; 
+                    }
+                }
+                
+                if(!applyException) isWork = isBaseWork; 
+                
+                if(!isWork) { 
+                    curDate.setDate(curDate.getDate() + 1); 
+                    continue; 
+                }
+
+                // 당일 변수 설정
+                let dStart, dDur, dLunchOn, dLunchS, dLunchE;
+                let isFullOverride = false, isPartOverride = false;
+                let activeInst = baseInst, activeRoom = baseRoom, activeSubj = null;
+
+                if (applyException && targetEx) {
+                    const ex = targetEx;
+                    dLunchOn = ex.noLunch ? false : (ex.lunchCustom ? true : lunchGlobalOn);
+                    
+                    if(ex.lunchCustom && ex.lunchStart && ex.lunchEnd) {
+                        dLunchS = parseInt(ex.lunchStart.slice(0,2))*60 + parseInt(ex.lunchStart.slice(2));
+                        dLunchE = parseInt(ex.lunchEnd.slice(0,2))*60 + parseInt(ex.lunchEnd.slice(2));
+                    } else { 
+                        dLunchS = globalLunchS; 
+                        dLunchE = globalLunchE; 
+                    }
+                    
+                    if(ex.type === 'FULL_CHANGE' || ex.type === 'FULL') {
+                        isFullOverride = true;
+                        dStart = (ex.startTime && ex.startTime.length === 4) ? (parseInt(ex.startTime.slice(0,2))*60 + parseInt(ex.startTime.slice(2))) : globalStartM;
+                        dDur = (ex.duration && parseFloat(ex.duration) > 0) ? (parseFloat(ex.duration)*60) : globalDurM;
+                    } else if (ex.type === 'SHIFT_TIME') {
+                        isFullOverride = true;
+                        dStart = (ex.startTime && ex.startTime.length === 4) ? (parseInt(ex.startTime.slice(0,2))*60 + parseInt(ex.startTime.slice(2))) : globalStartM;
+                        dDur = globalDurM;
+                    } else { 
+                        isPartOverride = true; 
+                        dStart = globalStartM; 
+                        dDur = globalDurM; 
+                    }
+                    
+                    activeInst = ex.instructor || baseInst;
+                    activeRoom = ex.room || baseRoom;
+                    if(ex.subjectCode) activeSubj = ex.subjectCode;
+                } else { 
+                    dStart = globalStartM; 
+                    dDur = globalDurM; 
+                    dLunchOn = lunchGlobalOn; 
+                    dLunchS = globalLunchS; 
+                    dLunchE = globalLunchE; 
+                }
+
+                let dEndM = dStart + dDur;
+                if(dLunchOn && dStart < dLunchS && dEndM > dLunchS) {
+                    dEndM += (dLunchE - dLunchS);
+                }
+                
+                let todayStartStr = fmtTime(dStart);
+                let todayEndStr = fmtTime(dEndM);
+                let exBlockS = -1, exBlockE = -1;
+
+                if(applyException && isPartOverride && targetEx) {
+                    const ex = targetEx;
+                    let eS = dStart;
+                    if(ex.startTime && ex.startTime.length === 4) eS = parseInt(ex.startTime.slice(0,2))*60 + parseInt(ex.startTime.slice(2));
+                    
+                    let eDur = dDur;
+                    if(ex.duration && parseFloat(ex.duration) > 0) eDur = parseFloat(ex.duration)*60;
+                    
+                    exBlockS = eS;
+                    let rawEnd = eS + eDur;
+                    if(dLunchOn && eS < dLunchS && rawEnd > dLunchS) rawEnd += (dLunchE - dLunchS);
+                    exBlockE = rawEnd;
+                } else if (isFullOverride) { 
+                    exBlockS = dStart; 
+                    exBlockE = dEndM; 
+                }
+
+                // 블록 삽입 내부 함수
+                function pushRow(s, e, type, inst, room, subj) {
+                    if(rawRows.length > 0) {
+                        let last = rawRows[rawRows.length - 1];
+                        if(last.date === ymd && last.type === type && last.inst === inst && last.room === room && last.subj === subj && last.end === s) {
+                            last.end = e; return;
+                        }
+                    }
+                    rawRows.push({
+                        date: ymd, sD: parseInt(ymd.replace(/-/g,"")), sT: parseInt(s.replace(/[^0-9]/,"")),
+                        start: s, end: e, type: type, inst: inst, room: room, subj: subj,
+                        dayStartStr: todayStartStr, dayEndStr: todayEndStr
+                    });
+                }
+
+                let timePtr = dStart; 
+                let dayBudget = dDur; 
+                let remain = tgt - total;
+                
+                if (dayBudget > remain) {
+                    dayBudget = remain;
+                    let tempEnd = dStart + dayBudget;
+                    if (dLunchOn && dStart < dLunchS && tempEnd > dLunchS) tempEnd += (dLunchE - dLunchS);
+                    todayEndStr = fmtTime(tempEnd);
+                }
+
+                // 당일 시간 배분 루프
+                while(dayBudget > 0.1 && queue.length > 0) {
+                    if(total >= tgt) break;
+                    
+                    if(dLunchOn) {
+                        if (timePtr === dLunchS) { 
+                            pushRow(fmtTime(dLunchS), fmtTime(dLunchE), 2, "", "", ""); 
+                            timePtr = dLunchE; 
+                            continue; 
+                        }
+                        if (timePtr > dLunchS && timePtr < dLunchE) { 
+                            timePtr = dLunchE; 
+                            continue; 
+                        }
+                    }
+                    
+                    let alloc = dayBudget;
+                    if(dLunchOn && timePtr < dLunchS) { 
+                        let dist = dLunchS - timePtr; 
+                        if(alloc > dist) alloc = dist; 
+                    }
+                    
+                    if(applyException && isPartOverride) {
+                        if(timePtr < exBlockS && (timePtr + alloc) > exBlockS) alloc = exBlockS - timePtr;
+                        else if(timePtr >= exBlockS && timePtr < exBlockE) { 
+                            if((timePtr + alloc) > exBlockE) alloc = exBlockE - timePtr; 
+                        }
+                    }
+                    
+                    if(alloc <= 0.01) break;
+                    
+                    let curInst = baseInst, curRoom = baseRoom, curSubj = null, deductTarget = null;
+                    let insideExBlock = false;
+                    
+                    if(isFullOverride) insideExBlock = true;
+                    else if(applyException && isPartOverride && timePtr >= exBlockS && (timePtr + 0.01) < exBlockE) insideExBlock = true;
+
+                    if(insideExBlock && targetEx) {
+                        const ex = targetEx;
+                        curInst = ex.instructor || baseInst; 
+                        curRoom = ex.room || baseRoom;
+                        if(activeSubj) { 
+                            curSubj = activeSubj; 
+                            deductTarget = queue.find(q => q.name.trim() === activeSubj.trim()); 
+                        }
+                    }
+                    
+                    if(!curSubj) {
+                        if(queue.length === 0) break;
+                        curSubj = queue[0].name; 
+                        deductTarget = queue[0];
+                    }
+                    
+                    if(deductTarget && alloc > deductTarget.remain) alloc = deductTarget.remain;
+                    if(total + alloc > tgt) alloc = tgt - total;
+                    
+                    let nextTime = timePtr + alloc;
+                    pushRow(fmtTime(timePtr), fmtTime(nextTime), 1, curInst, curRoom, curSubj);
+                    
+                    total += alloc; 
+                    dayBudget -= alloc; 
+                    timePtr = nextTime;
+                    
+                    if(deductTarget) {
+                        deductTarget.remain -= alloc;
+                        if(deductTarget.remain <= 0.01) {
+                            if(deductTarget === queue[0]) queue.shift();
+                            else { 
+                                let idx = queue.indexOf(deductTarget); 
+                                if(idx > -1) queue.splice(idx, 1); 
+                            }
+                        }
+                    } else if (insideExBlock && queue.length > 0) {
+                        queue[0].remain -= alloc;
+                        if (queue[0].remain <= 0.01) queue.shift();
+                    }
+                }
+                
+                if(total >= tgt) break;
+                curDate.setDate(curDate.getDate() + 1);
+            }
+
+            // 4. 생성된 블록 병합 (Merge)
+            let merged = [];
+            if(rawRows.length > 0) {
+                let curr = rawRows[0];
+                for(let i = 1; i < rawRows.length; i++) {
+                    let next = rawRows[i];
+                    if(curr.date === next.date && curr.type === next.type && curr.inst === next.inst && curr.room === next.room && curr.subj === next.subj && curr.end === next.start) {
+                        curr.end = next.end;
+                    } else { 
+                        merged.push(curr); 
+                        curr = next; 
+                    }
+                }
+                merged.push(curr);
+            }
+
+            // 5. 화면 표시 및 검증 수행
+            finalGridData = organizeGroups(merged);
+            renderGridFromRows(finalGridData);
+            validateSchedule(finalGridData);
+
+            // ▼▼▼ [여기가 핵심입니다] 결과 처리 로직 ▼▼▼
+            if(finalGridData && finalGridData.length > 0) {
+                let targetRow = null;
+                const separatorIdx = finalGridData.findIndex(r => r.isSeparator);
+                
+                if (separatorIdx !== -1) {
+                    targetRow = finalGridData[separatorIdx - 1];
+                } else {
+                    for(let i = finalGridData.length - 1; i >= 0; i--) {
+                        if(!finalGridData[i].isBlank && finalGridData[i].date) { 
+                            targetRow = finalGridData[i]; 
+                            break; 
+                        }
+                    }
+                }
+
+                if(targetRow && targetRow.date) {
+                    const lastDateStr = targetRow.date;
+                    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+                    const dayName = dayNames[new Date(lastDateStr).getDay()];
+                    
+                    const placedHours = total / 60;
+                    const targetHours = tgt / 60;
+                    const diff = targetHours - placedHours;
+                    
+                    // ★ [신규 추가] 화면 하단에 종강일 텍스트 꽂아주기
+                    var endDateInp = document.getElementById('calcEndDateDisplay');
+                    if(endDateInp) endDateInp.value = lastDateStr + " (" + dayName + ")";
+
+                    // 1. [팝업] 종강일 및 시간 정보 안내
+                    let msg = `🎉 생성 완료!<br>📅 종강일: ${lastDateStr} (${dayName})`;
+                    if (diff > 0.1) msg += `<br>⚠️ 부족: -${diff.toFixed(1)}H`;
+                    else if (diff < -0.1) msg += `<br>⛔ 초과: +${Math.abs(diff).toFixed(1)}H`;
+                    
+                    showToast(msg, "success");
+
+                    // 2. [구글 시트] 종강일 자동 저장
+                    if (currentSheetName) {
+                        const pName = document.getElementById('projName').value || savedProjName;
+                        const pRound = document.getElementById('projRound').value;
+                        
+                        // ★ [타이밍 버그 픽스] 알림창이 브라우저 시간을 멈추는 것을 막기 위해, setTimeout으로 한 템포 늦게 알림창을 띄웁니다.
+                        setTimeout(function() {
+                            if(confirm(`구글 시트 [${currentSheetName}] 과정에\n종강일(${lastDateStr})을 업데이트 할까요?`)) {
+                                google.script.run
+                                    .withSuccessHandler(function(res) { 
+                                        if (typeof res === 'object' && res.success) {
+                                            showToast(res.msg, "success");
+                                            pendingSheetUndo = { sheetName: res.sheetName, rowNum: res.rowNum, data: res.prevData };
+                                            pendingSheetRedo = { sheetName: res.sheetName, rowNum: res.rowNum, data: res.newData };
+                                            saveStateToBrowser(true); // 여기서 최종 찰칵!
+                                            pendingSheetUndo = null;
+                                            pendingSheetRedo = null;
+                                        } else {
+                                            console.log("시트 저장 완료: " + (res.msg || res)); 
+                                        }
+                                    })
+                                    .withFailureHandler(function(err) { 
+                                        showToast("❌ 시트 저장 실패: " + err.message, "error"); 
+                                    })
+                                    .updateEndDate(currentSheetName, pName, pRound, lastDateStr);
+                            }
+                        }, 350); // 0.35초 대기 (이전의 자동 저장 예약이 끝난 후에 실행되도록 함)
+                    }
+                }
+            }
+        } catch(e) { 
+            console.error(e); 
+            showToast("오류: " + e.message, "error"); 
+        }
+    }
+
+
+    // =========================================================
+    // 19. 엑셀 다운로드 (Export Excel)
+    // =========================================================
+
+    async function exportExcel() {
+        if(!window.XLSX) { showToast("엑셀 라이브러리 로드 실패", "error"); return; }
+
+        const rows = document.querySelectorAll('#resultBody .grid-row');
+        if(rows.length === 0) { showToast("데이터가 없습니다. [생성]을 먼저 해주세요.", "warning"); return; }
+
+        try {
+            // 1. 기본 헤더
+            let data = [
+                ["일자별 시간표 내역을 입력합니다", "", "", "", "교시별 세부 시간표 내역을 입력합니다", "", "", "", ""],
+                ["훈련일자", "훈련시작시간", "훈련종료시간", "방학/원격여부", "시작시간", "시간구분", "훈련강사코드", "교육장소(강의실)코드", "교과목(및 능력단위)코드"]
+            ];
+
+            let currentRowIdx = 2; 
+            const dateRowRef = {};      
+            const separatorIndices = []; 
+
+            // 2. 데이터 수집 루프
+            rows.forEach((rowDiv, i) => {
+                if(rowDiv.classList.contains('separator-row')) {
+                    data.push(["","","","","","","","",""]);
+                    separatorIndices.push(currentRowIdx); 
+                    currentRowIdx++;
+                    return;
+                }
+
+                const cells = rowDiv.querySelectorAll('.cell');
+                const getVal = (idx) => {
+                    if(!cells[idx]) return "";
+                    const input = cells[idx].querySelector('input, select');
+                    return input ? input.value : cells[idx].innerText.trim();
+                };
+
+                const dateVal = getVal(0);
+
+                let rowArr = [
+                    dateVal, getVal(1), getVal(2), getVal(3), getVal(4),
+                    getVal(5), getVal(6), getVal(7), getVal(8)
+                ];
+
+                if(dateVal) {
+                    if(dateRowRef[dateVal] === undefined) {
+                        dateRowRef[dateVal] = currentRowIdx; 
+                    } else {
+                        const refRow = dateRowRef[dateVal] + 1; 
+                        rowArr[0] = { f: "A" + refRow, t: 'n', v: parseInt(dateVal) || dateVal }; 
+                    }
+                }
+
+                data.push(rowArr);
+                currentRowIdx++; 
+            });
+
+            // 3. 시트 생성
+            const ws = XLSX.utils.aoa_to_sheet(data);
+
+            // 4. 스타일 정의 
+            const bs = { 
+                font: { name: "맑은 고딕", sz: 10 }, 
+                alignment: { horizontal: "center", vertical: "center" }, 
+                border: { 
+                    top: {style:"thin", color: {rgb: "000000"}}, 
+                    bottom: {style:"thin", color: {rgb: "000000"}}, 
+                    left: {style:"thin", color: {rgb: "000000"}}, 
+                    right: {style:"thin", color: {rgb: "000000"}} 
+                } 
+            };
+            
+            // 5. 셀 너비 계산
+            const colWidths = new Array(9).fill(0);
+            data.forEach(row => {
+                row.forEach((cell, i) => {
+                    let str = (cell && typeof cell === 'object' && cell.v) ? String(cell.v) : String(cell || "");
+                    let len = 0;
+                    for(let k=0; k<str.length; k++) len += (str.charCodeAt(k) > 128) ? 1.9 : 0.9;
+                    if(len > colWidths[i]) colWidths[i] = len;
+                });
+            });
+
+            function getCellWidth(rIdx, cIdx, defaultW) {
+                if (data[rIdx] && data[rIdx][cIdx]) {
+                    let cellVal = data[rIdx][cIdx];
+                    let str = (cellVal && typeof cellVal === 'object' && cellVal.v) ? String(cellVal.v) : String(cellVal || "");
+                    let len = 0;
+                    for(let k=0; k<str.length; k++) {
+                        len += (str.charCodeAt(k) > 128) ? 1.9 : 0.9;
+                    }
+                    return Math.max(len + 2, 10); 
+                }
+                return defaultW; 
+            }
+
+            ws['!cols'] = colWidths.map((w, i) => {
+                let finalWidth = Math.max(w + 2, 10); 
+                if (i === 0) finalWidth = getCellWidth(2, 0, 15); 
+                if (i === 1) finalWidth = getCellWidth(1, 1, 15); 
+                if (i === 2) finalWidth = getCellWidth(1, 2, 15); 
+                if (i === 3) finalWidth = getCellWidth(1, 3, 15); 
+                if (i === 4) finalWidth = getCellWidth(2, 4, 15); 
+                return { wch: finalWidth };
+            });
+
+            // 6. 스타일 적용 루프
+            const range = XLSX.utils.decode_range(ws['!ref']);
+            for(let R=range.s.r; R<=range.e.r; ++R) {
+                if(separatorIndices.includes(R)) continue; 
+
+                for(let C=range.s.c; C<=range.e.c; ++C) {
+                    const ref = XLSX.utils.encode_cell({r:R, c:C});
+                    if(!ws[ref]) continue; 
+
+                    if(R===0) {
+                        ws[ref].s = { 
+                            font: { name: "맑은 고딕", sz: 10, bold:true, color: {rgb: "000000"} }, 
+                            fill: { fgColor: { rgb: (C<=3?"6495ED":"FF69B4") } }, 
+                            alignment: { horizontal: "center", vertical: "center" }, 
+                            border: bs.border 
+                        };
+                    }
+                    else if(R===1) {
+                        ws[ref].s = { 
+                            font: { name: "맑은 고딕", sz: 10, bold:true }, 
+                            fill: { fgColor: { rgb: "F1F1F1" } }, 
+                            alignment: { horizontal: "center", vertical: "center" }, 
+                            border: bs.border 
+                        };
+                    }
+                    else {
+                        ws[ref].s = JSON.parse(JSON.stringify(bs)); 
+                        if(R%2!==0) ws[ref].s.fill = { fgColor: { rgb: "F9F9F9" } }; 
+                    }
+                }
+            }
+            
+            ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:3}}, {s:{r:0,c:4},e:{r:0,c:8}}];
+
+            // 7. 워크북 생성 및 백업 데이터 첨부
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+            
+            try {
+                const currentState = collectCurrentState(); 
+                const recoveryJson = JSON.stringify(currentState);
+                const ws2 = XLSX.utils.aoa_to_sheet([["RECOVERY_DATA"], [recoveryJson]]);
+                XLSX.utils.book_append_sheet(wb, ws2, "Config_DoNotDelete");
+            } catch(e) { console.warn("복구 데이터 생성 실패", e); }
+            
+            // 8. 다운로드 실행
+            const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+            const pName = document.getElementById('projName').value || "HRD_시간표";
+            const pRoundEl = document.getElementById('projRound');
+            const pRound = pRoundEl ? pRoundEl.value : "";
+            const exceptionSuffix = (exceptions && exceptions.length > 0) ? "_예외" : "";
+            
+            const fName = pName + (pRound ? "_" + pRound : "") + exceptionSuffix + ".xlsx";
+            
+            saveFile(wbout, fName);
+            
+            if (currentSheetName) { 
+                setTimeout(function() {
+                    saveToCloud('fromExcel'); 
+                }, 300); 
+            }
+
+        } catch(e) { 
+            console.error(e); 
+            showToast("저장 중 오류: " + e.message, "error"); 
+        }
+    }
+
+    // =========================================================
+    // 20. 프로젝트 관리 (저장 / 불러오기 / 엑셀 복구)
+    // =========================================================
+
+    // 엑셀 시트에서 설정 데이터 복구
+    function importFromExcel(input) {
+        if (!input.files[0]) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const recoverySheet = workbook.Sheets["Config_DoNotDelete"];
+                
+                if (!recoverySheet) {
+                    showToast("❌ 복구 데이터가 없는 엑셀 파일입니다.", "warning");
+                    return;
+                }
+
+                const jsonData = recoverySheet['A2'] ? recoverySheet['A2'].v : null;
+                if (jsonData) {
+                    applyState(JSON.parse(jsonData));
+                    showToast("✅ 엑셀에서 모든 설정이 완벽하게 복원되었습니다!", "success");
+                    
+                    // ★ 추가: 엑셀 복구가 끝나면 즉시 찰칵!
+                    saveStateToBrowser(true);
+                }
+            } catch (err) {
+                showToast("❌ 파일 해석 오류: " + err.message, "error");
+            }
+        };
+        reader.readAsArrayBuffer(input.files[0]);
+    }
+
+    // 로컬 JSON으로 저장
+    async function saveProjectFile() { 
+        try { 
+            const s = collectCurrentState(); 
+            const blob = new Blob([JSON.stringify(s)], {type: "application/json"}); 
+            const fName = (s.projName||"무제")+"_프로젝트.json"; 
+            saveFile(JSON.stringify(s), fName); 
+        } catch(e) { 
+            showToast("저장 중 오류가 발생했습니다: " + e.message, "error"); 
+        } 
+    }
+
+    // 로컬 JSON 파일 불러오기
+    function loadProjectFile(input) { 
+        if(!input.files[0]) return; 
+        const fName = input.files[0].name.toLowerCase(); 
+        if(fName.endsWith('.xls') || fName.endsWith('.xlsx')) { 
+            showToast("❌ 주의: 엑셀 파일은 아래 '데이터 로드' 섹션에 넣어주세요!<br>여기는 프로젝트(.json) 파일 전용입니다.", "warning"); 
+            input.value = ""; 
+            return; 
+        } 
+
+        const r = new FileReader(); 
+        r.onload = function(e) { 
+            let data; 
+            try { 
+                data = JSON.parse(e.target.result); 
+            } catch(e) { 
+                showToast("불러오기 실패: 올바른 프로젝트 파일이 아닙니다.<br>(텍스트 형식이 아니거나 손상됨)", "warning"); 
+                input.value = ""; 
+                return; 
+            } 
+            try { 
+                applyState(data); 
+                showToast("프로젝트 로드 완료!", "success"); 
+                
+                // ★ 추가: JSON 파일로 세팅이 끝나면 즉시 찰칵!
+                saveStateToBrowser(true);
+            } catch(e) {
+                console.error(e); 
+                showToast("데이터 적용 중 오류가 발생했습니다.<br>내용: " + e.message, "error"); 
+            } 
+        }; 
+        r.readAsText(input.files[0]); 
+    }
+
+    // =========================================================
+    // 21. 상태 수집 및 적용 (상태 관리자)
+    // =========================================================
+
+    // 현재 폼의 모든 설정값 + ★레이아웃 크기 + 결과물★ 객체로 수집
+    function collectCurrentState() { 
+        const subjects = []; 
+        document.querySelectorAll('#subjListBody .grid-row').forEach(row => { 
+            subjects.push({ 
+                name: row.querySelector('.subj-name-input').value, 
+                hours: row.querySelector('.subj-hour').value 
+            }); 
+        }); 
+        
+        let w1 = getCheckedDays('week1Days'); 
+        let w2 = []; 
+        if(document.getElementById('chkSamePattern').checked) w2 = [...w1]; 
+        else w2 = getCheckedDays('week2Days'); 
+        
+        const roundEl = document.getElementById('projRound'); 
+        const roundVal = roundEl ? roundEl.value : ""; 
+
+        const layoutData = {
+            topPanelHeight: document.getElementById('topPanel').style.height,
+            sections: {},
+            gridCols: [],
+            subjCols: []
+        };
+        ['sec_proj', 'sec_date', 'sec_time', 'sec_holiday', 'sec_file', 'sec_ex', 'sec_list'].forEach(id => {
+            const el = document.getElementById(id);
+            if(el) layoutData.sections[id] = { w: el.style.width, h: el.style.height };
+        });
+        document.querySelectorAll('#resultHeader .cell').forEach(c => layoutData.gridCols.push(c.style.width || c.style.flex));
+        document.querySelectorAll('#subjGrid .grid-header .cell').forEach(c => layoutData.subjCols.push(c.style.width));
+        
+        // ★ [UI 픽스] 종강일 텍스트와 그리드 데이터, 알림창 상태도 기억하게 추가!
+        const endDisp = document.getElementById('calcEndDateDisplay');
+        const bjnAlert = document.getElementById('bjnAlert');
+
+        return { 
+            projName: document.getElementById('projName').value, 
+            projRound: roundVal, 
+            startDate: document.getElementById('startDate').value, 
+            targetTotalHours: document.getElementById('targetTotalHours').value, 
+            week1Days: w1, 
+            week2Days: w2, 
+            isSamePattern: document.getElementById('chkSamePattern').checked, 
+            dailyStartTime: document.getElementById('dailyStartTime').value, 
+            dailyDuration: document.getElementById('dailyDuration').value, 
+            lunchStart: document.getElementById('lunchStart').value, 
+            lunchEnd: document.getElementById('lunchEnd').value, 
+            chkLunch: document.getElementById('chkLunch').checked, 
+            holidays: Array.from(holidays), 
+            exceptions: exceptions, 
+            rdDataList: rdDataList, 
+            isCodeLoaded: isCodeLoaded, 
+            instructorOpts: instructorOpts, 
+            roomOpts: roomOpts, 
+            subjectOpts: subjectOpts, 
+            subjectRules: subjectRules, 
+            baseInstructor: document.getElementById('baseInstructor').value, 
+            baseRoom: document.getElementById('baseRoom').value, 
+            subjectList: subjects,
+            layout: layoutData,
+            
+            // ★ [추가] 화면에 보이는 결과물도 기억
+            calcEndDateDisplay: endDisp ? endDisp.value : "",
+            finalGridData: finalGridData,
+            //isBjnAlertVisible: bjnAlert ? (bjnAlert.style.display === 'block') : false,
+            //bjnMessage: document.getElementById('bjnMessage') ? document.getElementById('bjnMessage').innerText : "",
+
+            // ★ 수퍼 타임머신: 시트 복구 스냅샷 탑승!
+            sheetActionUndo: typeof pendingSheetUndo !== 'undefined' ? pendingSheetUndo : null,
+            sheetActionRedo: typeof pendingSheetRedo !== 'undefined' ? pendingSheetRedo : null
+        }; 
+    }
+
+    function loadStateFromBrowser() { 
+        // ... 기존 코드 유지 (여기는 변경 없음)
+        const s = localStorage.getItem('hrd_scheduler_v134_state'); 
+        if(s) { 
+            applyState(JSON.parse(s)); 
+            const d = document.getElementById('startDate'); 
+            if(d && d.value) prevStartDate = d.value; 
+            const t = document.getElementById('dailyStartTime'); 
+            if(t && t.value) prevStartTime = t.value; 
+        } else { 
+            setCheckedDays('week1Days', [1,2,3,4,5]); 
+            document.getElementById('chkSamePattern').checked = true; 
+            toggleWeek2(document.getElementById('chkSamePattern')); 
+            document.getElementById('projRound').value = "1회"; 
+            const d = document.getElementById('startDate'); 
+            if(d) prevStartDate = d.value; 
+        } 
+    }
+
+    // 객체로 전달된 상태를 실제 화면(UI)에 반영
+    function applyState(s) {
+        if(!s) return;
+        document.getElementById('projName').value = s.projName||"";
+        document.getElementById('projRound').value = s.projRound||"";
+        
+        document.getElementById('startDate').value = s.startDate||"";
+        prevStartDate = s.startDate || ""; 
+
+        document.getElementById('targetTotalHours').value = s.targetTotalHours||0;
+        
+        if(s.week1Days) setCheckedDays('week1Days', s.week1Days);
+        if(s.week2Days) setCheckedDays('week2Days', s.week2Days);
+        if(s.isSamePattern !== undefined) {
+            document.getElementById('chkSamePattern').checked = s.isSamePattern;
+            toggleWeek2(document.getElementById('chkSamePattern'));
+        }
+        
+        document.getElementById('dailyStartTime').value = s.dailyStartTime||"0930";
+        prevStartTime = s.dailyStartTime || "0930";
+
+        document.getElementById('dailyDuration').value = s.dailyDuration||"";
+        document.getElementById('lunchStart').value = s.lunchStart||"1230";
+        document.getElementById('lunchEnd').value = s.lunchEnd||"1300";
+        document.getElementById('chkLunch').checked = s.chkLunch;
+        
+        holidays = new Set(s.holidays||[]);
+        renderHolidays();
+        
+        exceptions = s.exceptions||[];
+        renderExceptions();
+        
+        rdDataList = s.rdDataList || [];
+        rdDataMap = s.rdDataMap || {};
+        
+        if(rdDataList.length > 0) {
+            let ncs = rdDataList.filter(x=>x.type==='NCS').length;
+            let non = rdDataList.length - ncs;
+            document.getElementById('rdStatus').innerText=`✅ RD 로드됨 (NCS:${ncs}, 일반:${non})`;
+        } else if(Object.keys(rdDataMap).length > 0) {
+            document.getElementById('rdStatus').innerText=`✅ RD 로드됨 (${Object.keys(rdDataMap).length}건)`;
+        }
+        
+        isCodeLoaded = s.isCodeLoaded||false;
+        instructorOpts = s.instructorOpts||[];
+        roomOpts = s.roomOpts||[];
+        subjectOpts = s.subjectOpts||[];
+        subjectRules = s.subjectRules || {};
+        
+        fillSel('baseInstructor', instructorOpts);
+        fillSel('baseRoom', roomOpts);
+        fillSel('exInstructor', instructorOpts);
+        fillSel('exRoom', roomOpts);
+        fillSel('exSubject', subjectOpts);
+        
+        document.getElementById('baseInstructor').value = s.baseInstructor||"";
+        document.getElementById('baseRoom').value = s.baseRoom||"";
+        
+        const lb = document.getElementById('subjListBody');
+        lb.innerHTML="";
+        if(s.subjectList) s.subjectList.forEach(i=>addSubject(i.name, i.hours));
+        
+        calcEndTime();
+        toggleExTimeInputs();
+
+        // =========================================================
+        // ★ [UI 픽스] 종강일과 그리드 결과물도 완벽하게 복구
+        // =========================================================
+        const endDisp = document.getElementById('calcEndDateDisplay');
+        if(endDisp) endDisp.value = s.calcEndDateDisplay || "";
+        
+        finalGridData = s.finalGridData || [];
+        if(finalGridData.length > 0) {
+            renderGridFromRows(finalGridData);
+            validateSchedule(finalGridData);
+        } else {
+            // 과거에 생성된 표가 없다면 깨끗하게 지워주기!
+            document.getElementById('resultBody').innerHTML = "";
+            const vPanel = document.getElementById('validationPanel');
+            if (vPanel) { vPanel.innerHTML = ""; vPanel.style.display = "none"; vPanel.className = ""; }
+        }
+
+        // 🚨 Z열 정보로 알림창을 강제로 덮어씌우던 부분
+        // const bjnA = document.getElementById('bjnAlert');
+        //if(bjnA) {
+        //    bjnA.style.display = s.isBjnAlertVisible ? 'block' : 'none';
+        //    if(s.bjnMessage) document.getElementById('bjnMessage').innerText = s.bjnMessage;
+        //    document.getElementById('chkClearM').checked = true;
+        //}
+
+        // ★ 과거 레이아웃 상태가 존재하면 박스와 그리드 크기 즉시 복원!
+        if (s.layout) {
+            const topPanel = document.getElementById('topPanel');
+            if (topPanel && s.layout.topPanelHeight !== undefined) {
+                topPanel.style.height = s.layout.topPanelHeight || "";
+            }
+
+            if (s.layout.sections) {
+                for (const [id, size] of Object.entries(s.layout.sections)) {
+                    const el = document.getElementById(id);
+                    if (el) { 
+                        el.style.width = size.w || ""; 
+                        el.style.height = size.h || ""; 
+                    }
+                }
+            }
+            
+            if (s.layout.gridCols && s.layout.gridCols.length > 0) {
+                document.querySelectorAll('#resultHeader .cell').forEach((cell, i) => {
+                    if (s.layout.gridCols[i] === '1' || String(s.layout.gridCols[i]).includes('flex')) {
+                        cell.style.width = ""; cell.style.flex = "1";
+                    } else {
+                        cell.style.flex = "none"; cell.style.width = s.layout.gridCols[i] || "";
+                    }
+                });
+            }
+            
+            if (s.layout.subjCols) {
+                document.querySelectorAll('#subjGrid .grid-header .cell').forEach((c, i) => {
+                    if(s.layout.subjCols[i] !== undefined) c.style.width = s.layout.subjCols[i] || "";
+                });
+            }
+            
+            setTimeout(() => { if(typeof LayoutManager !== 'undefined') LayoutManager.syncGridBody(); }, 50); 
+        }
+    }
+    
+    // =========================================================
+    // ★ 수퍼 타임머신 작동 함수 (Undo / Redo)
+    // =========================================================
+
+    function undo() {
+        if (historyIndex > 0) {
+            isUndoRedoAction = true;
+            
+            const currentStateObj = JSON.parse(historyStack[historyIndex]);
+            // ★ 타임머신을 떠나기 전에 시트 복구 명령 쏘기!
+            if (currentStateObj.sheetActionUndo) {
+                showLoading(); // 시트 작업 중 로딩 띄우기
+                google.script.run
+                    .withSuccessHandler(function() { 
+                        hideLoading(); 
+                        showToast("☁️ 구글 시트가 이전 상태로 완벽히 복구되었습니다.", "success"); 
+                    })
+                    .withFailureHandler(function(err) { 
+                        hideLoading(); 
+                        showToast("❌ 시트 복구 실패: " + err.message, "error"); 
+                    })
+                    .restoreSuperAction(currentStateObj.sheetActionUndo); 
+            }
+
+            historyIndex--;
+            const prevState = JSON.parse(historyStack[historyIndex]);
+            applyState(prevState);
+            
+            localStorage.setItem('hrd_scheduler_v134_state', historyStack[historyIndex]);
+            if(!currentStateObj.sheetActionUndo) showToast("↩️ 실행 취소 (이전 단계로)", "info");
+            setTimeout(() => { isUndoRedoAction = false; }, 100);
+        } else {
+            showToast("더 이상 되돌릴 작업이 없습니다.", "warning");
+        }
+    }
+
+    function redo() {
+        if (historyIndex < historyStack.length - 1) {
+            isUndoRedoAction = true;
+            historyIndex++;
+            
+            const nextStateObj = JSON.parse(historyStack[historyIndex]);
+            
+            // ★ 미래로 갈 때 시트 변경 내역이 있으면 다시 적용!
+            if (nextStateObj.sheetActionRedo) {
+                showLoading();
+                google.script.run
+                    .withSuccessHandler(function() { 
+                        hideLoading(); 
+                        showToast("☁️ 구글 시트 변경 사항이 다시 적용되었습니다.", "success"); 
+                    })
+                    .withFailureHandler(function(err) { 
+                        hideLoading(); 
+                        showToast("❌ 시트 적용 실패: " + err.message, "error"); 
+                    })
+                    .restoreSuperAction(nextStateObj.sheetActionRedo);
+            }
+
+            applyState(nextStateObj);
+            
+            localStorage.setItem('hrd_scheduler_v134_state', historyStack[historyIndex]);
+            if(!nextStateObj.sheetActionRedo) showToast("↪️ 다시 실행 (다음 단계로)", "info");
+            setTimeout(() => { isUndoRedoAction = false; }, 100);
+        } else {
+            showToast("더 이상 다시 실행할 작업이 없습니다.", "warning");
+        }
+    }
+
+    // =========================================================
+    // 22. 구글 시트 마스터 저장 연동
+    // =========================================================
+
+    function saveToCloud(mode) {
+        if (!currentSheetName) {
+            if (mode !== 'fromExcel') showToast("먼저 아래 목록에서 과정을 선택해주세요!", "warning");
+            return;
+        }
+        var pName = document.getElementById('projName').value || savedProjName;
+        var pRound = document.getElementById('projRound').value;
+
+        var currentStartDate = document.getElementById('startDate').value;
+        var sTimeRaw = document.getElementById('dailyStartTime').value;
+        var eTimeRaw = document.getElementById('calcEndTimeDisplay').value;
+        var newClassTime = sTimeRaw.slice(0,2) + ":" + sTimeRaw.slice(2) + "~" + eTimeRaw.slice(0,2) + ":" + eTimeRaw.slice(2);
+
+        var cDateClean = String(currentStartDate).replace(/[^0-9]/g, "");
+        var oDateClean = String(loadedOriginalStartDate).replace(/[^0-9]/g, "");
+        var isDateChanged = (oDateClean !== "" && cDateClean !== oDateClean);
+
+        var clearM = false;
+        var bjnAlert = document.getElementById('bjnAlert');
+        if (bjnAlert && bjnAlert.style.display === 'block' && document.getElementById('chkClearM').checked) {
+            clearM = true;
+            isDateChanged = true; 
+        }
+
+        // 1. 현재 입력된 훈련시간 단위 자동 판별 (24 넘으면 분, 아니면 H)
+        var cDurRaw = parseFloat(document.getElementById('dailyDuration').value) || 0;
+        var cDurStr = cDurRaw > 24 ? cDurRaw + "분" : cDurRaw + "H";
+
+        // ★ [공통] 점심시간 적용 여부 및 몇 분인지 계산
+        var isLunch = document.getElementById('chkLunch').checked;
+        var lStartVal = document.getElementById('lunchStart').value || "1230";
+        var lEndVal = document.getElementById('lunchEnd').value || "1300";
+        var lsm = parseInt(lStartVal.slice(0, 2)) * 60 + parseInt(lStartVal.slice(2));
+        var lem = parseInt(lEndVal.slice(0, 2)) * 60 + parseInt(lEndVal.slice(2));
+        var lunchMin = lem - lsm; // 점심시간(분)
+
+        var origTimeStr = "정보 없음";
+        if (loadedOriginalStartTime && loadedOriginalStartTime.length === 4) {
+            var oDurRaw = parseFloat(loadedOriginalDuration) || 0;
+            var durM = oDurRaw > 24 ? oDurRaw : (oDurRaw * 60); 
+            
+            var sm = parseInt(loadedOriginalStartTime.slice(0, 2)) * 60 + parseInt(loadedOriginalStartTime.slice(2));
+            var em = sm + Math.round(durM); 
+            
+            // 변경 전 시간에 점심시간이 겹치는지 확인
+            var hasLunchOrig = (isLunch && sm < lsm && em > lsm);
+            if (hasLunchOrig) em += lunchMin; 
+            
+            var oSh = loadedOriginalStartTime.slice(0, 2);
+            var oSm = loadedOriginalStartTime.slice(2);
+            var oEh = String(Math.floor(em / 60)).padStart(2, '0');
+            var oEm = String(em % 60).padStart(2, '0');
+            
+            var oDurStr = oDurRaw > 24 ? oDurRaw + "분" : Number(oDurRaw.toFixed(2)) + "H";
+            // ★ [디테일] 점심이 적용되었으면 괄호 안에 "+ 점심 30분" 명시!
+            var lunchTxtOrig = hasLunchOrig ? ` + 점심 ${lunchMin}분` : "";
+            
+            origTimeStr = oSh + ":" + oSm + " ~ " + oEh + ":" + oEm + " (수업 " + oDurStr + lunchTxtOrig + ")";
+        }
+
+        // 변경 후 시간에도 똑같이 점심 텍스트 추가 계산
+        var newSm = parseInt(document.getElementById('dailyStartTime').value.slice(0, 2)) * 60 + parseInt(document.getElementById('dailyStartTime').value.slice(2));
+        var newEm = newSm + Math.round(cDurRaw > 24 ? cDurRaw : (cDurRaw * 60));
+        var hasLunchNew = (isLunch && newSm < lsm && newEm > lsm);
+        var lunchTxtNew = hasLunchNew ? ` + 점심 ${lunchMin}분` : "";
+
+        var confirmMsg = "";
+        if (mode === 'fromExcel') {
+            confirmMsg += `📥 엑셀 다운로드가 완료되었습니다.\n\n`;
+            confirmMsg += `⚠️ [구글 시트 마스터 저장 확인]\n이어서 구글 시트에도 덮어쓰시겠습니까?\n\n`;
+        } else {
+            confirmMsg += `⚠️ [구글 시트 덮어쓰기 확인]\n마스터 저장을 진행합니다. 덮어씌워질 내용을 확인하세요!\n\n`;
+        }
+
+        confirmMsg += `[📅 변경 전] 개강일 : ${loadedOriginalStartDate || '없음'}   |   시간 : ${origTimeStr}\n`;
+        confirmMsg += `[🔄 변경 후] 개강일 : ${currentStartDate}   |   시간 : ${newClassTime} (수업 ${cDurStr}${lunchTxtNew})\n\n`;
+        confirmMsg += `------------------------------------\n`;
+
+        if (isDateChanged) {
+             confirmMsg += `🔄 [이력 기록] K열(오늘날짜), L열(변경전: ${loadedOriginalStartDate || '없음'}) 자동 입력\n`;
+        } else {
+             confirmMsg += `ℹ️ [이력 없음] 날짜 변경 없음\n`;
+        }
+
+        if (clearM) {
+             confirmMsg += `🧹 [M열 청소] 보라색 지시사항 삭제\n`;
+        }
+        
+        // 여기서부터 바꿔주세요:
+        isUndoRedoAction = true; // ★ 감지 카메라 임시 정지
+
+        setTimeout(function() {
+            if(!confirm(confirmMsg)) {
+                isUndoRedoAction = false; // 취소 시 카메라 켜기
+                return; 
+            }
+
+            showLoading();
+
+            var payload = {
+                sheetName: currentSheetName, courseName: pName, round: pRound,
+                newStartDate: currentStartDate, newClassTime: newClassTime,
+                isDateChanged: isDateChanged, originalStartDate: loadedOriginalStartDate,
+                clearMColumn: clearM, jsonData: JSON.stringify(collectCurrentState())
+            };
+
+            google.script.run
+                .withSuccessHandler(function(res) { 
+                    hideLoading(); 
+                    if (typeof res === 'object' && res.success) {
+                        showToast(res.msg, "success"); 
+                        if(clearM) document.getElementById('bjnAlert').style.display = 'none'; 
+                        
+                        pendingSheetUndo = { sheetName: res.sheetName, rowNum: res.rowNum, data: res.prevData };
+                        pendingSheetRedo = { sheetName: res.sheetName, rowNum: res.rowNum, data: res.newData };
+                        
+                        isUndoRedoAction = false; // 카메라 켜기
+                        saveStateToBrowser(true); // 완벽한 한 장 찰칵!
+                        
+                        pendingSheetUndo = null;
+                        pendingSheetRedo = null;
+                    } else {
+                        showToast(res.msg || res, "success"); 
+                        if(clearM) document.getElementById('bjnAlert').style.display = 'none';
+                        isUndoRedoAction = false;
+                        saveStateToBrowser(true);
+                    }
+                })
+                .withFailureHandler(function(err) { 
+                    hideLoading(); 
+                    showToast("오류 발생: " + err, "error"); 
+                    isUndoRedoAction = false;
+                })
+                .masterSaveToSheet(payload);
+        }, 350);
+    }
+
+
+    // =========================================================
+    // 23. 화면 레이아웃 저장 및 복구 엔진 (LayoutManager)
+    // =========================================================
+
+    const LayoutManager = {
+        key: 'Janghoon_Layout_Manual_v4', 
+        sectionIds: ['sec_proj', 'sec_date', 'sec_time', 'sec_holiday', 'sec_file', 'sec_ex', 'sec_list'],
+
+        init: function() {
+            this.silentLoad(); 
+        },
+
+        manualSave: function() {
+            const data = { 
+                topPanelHeight: document.getElementById('topPanel').style.height, 
+                sections: {}, 
+                gridCols: [], 
+                subjCols: [] 
+            };
+            
+            this.sectionIds.forEach(id => {
+                const el = document.getElementById(id);
+                if(el) data.sections[id] = { w: el.style.width, h: el.style.height }; 
+            });
+            
+            document.querySelectorAll('#resultHeader .cell').forEach(c => data.gridCols.push(c.style.width || c.style.flex));
+            document.querySelectorAll('#subjGrid .grid-header .cell').forEach(c => data.subjCols.push(c.style.width));
+            
+            localStorage.setItem(this.key, JSON.stringify(data));
+            showToast("💾 상단 패널 높이와 모든 상자의 가로/세로 간격이 완벽하게 저장되었습니다!", "info");
+        },
+
+        silentLoad: function() {
+            const saved = localStorage.getItem(this.key);
+            if (!saved) return false;
+            try {
+                const data = JSON.parse(saved);
+                
+                if (data.topPanelHeight) {
+                    document.getElementById('topPanel').style.height = data.topPanelHeight;
+                }
+
+                if (data.sections) {
+                    for (const [id, size] of Object.entries(data.sections)) {
+                        const el = document.getElementById(id);
+                        if (el) { 
+                            if (size.w) el.style.width = size.w; 
+                            if (size.h) el.style.height = size.h; 
+                        }
+                    }
+                }
+                
+                if (data.gridCols && data.gridCols.length > 0) {
+                    document.querySelectorAll('#resultHeader .cell').forEach((cell, i) => {
+                        if (data.gridCols[i] === '1' || data.gridCols[i].includes('flex')) {
+                            cell.style.width = ""; cell.style.flex = "1";
+                        } else {
+                            cell.style.flex = "none"; cell.style.width = data.gridCols[i];
+                        }
+                    });
+                }
+                
+                if (data.subjCols) {
+                    document.querySelectorAll('#subjGrid .grid-header .cell').forEach((c, i) => {
+                        if(data.subjCols[i]) c.style.width = data.subjCols[i];
+                    });
+                }
+                
+                setTimeout(() => this.syncGridBody(), 50); 
+                return true;
+            } catch (e) { console.error("레이아웃 로드 실패", e); return false; }
+        },
+
+        manualLoad: function() {
+            if(this.silentLoad()) {
+                showToast("📂 마지막으로 저장했던 화면 간격을 불러왔습니다!", "info");
+            } else {
+                showToast("❌ 저장된 화면 간격 데이터가 없습니다.", "warning");
+            }
+        },
+
+        syncGridBody: function() {
+            const resHeaders = document.querySelectorAll('#resultHeader .cell');
+            const resRows = document.querySelectorAll('#resultBody .grid-row');
+            const resStyles = Array.from(resHeaders).map(h => ({ width: h.style.width, flex: h.style.flex }));
+            resRows.forEach(row => {
+                row.querySelectorAll('.cell').forEach((cell, i) => {
+                    if (resStyles[i]) { cell.style.width = resStyles[i].width; cell.style.flex = resStyles[i].flex; cell.style.flexShrink = "0"; }
+                });
+            });
+
+            const subjHeaders = document.querySelectorAll('#subjGrid .grid-header .cell');
+            const subjRows = document.querySelectorAll('#subjListBody .grid-row');
+            const subjStyles = Array.from(subjHeaders).map(h => ({ width: h.style.width, flex: h.style.flex }));
+            subjRows.forEach(row => {
+                row.querySelectorAll('.cell').forEach((cell, i) => {
+                    if (subjStyles[i]) { cell.style.width = subjStyles[i].width; cell.style.flex = subjStyles[i].flex; cell.style.flexShrink = "0"; }
+                });
+            });
+        },
+
+        reset: function() {
+            if(!confirm("화면 간격을 공장 초기화 상태(기본값)로 되돌리시겠습니까?")) return;
+            localStorage.removeItem(this.key);
+            
+            const topPanel = document.getElementById('topPanel');
+            if(topPanel) topPanel.style.height = "";
+            
+            this.sectionIds.forEach(id => {
+                const el = document.getElementById(id);
+                if(el) { el.style.width = ""; el.style.height = ""; }
+            });
+
+            const subjDefaults = ['40px', '350px', '60px', '50px', '40px'];
+            const applyStyle = (el, val) => { el.style.width = val; el.style.flex = "none"; };
+            document.querySelectorAll('#subjGrid .grid-header .cell').forEach((c, i) => applyStyle(c, subjDefaults[i]));
+            
+            const mainDefaults = ['100px', '100px', '100px', '70px', '100px', '60px', '150px', '500px', '930px'];
+            document.querySelectorAll('#resultHeader .cell').forEach((c, i) => applyStyle(c, mainDefaults[i]));
+
+            this.syncGridBody(); 
+            showToast("🔄 화면 배치가 초기화되었습니다.", "info");
+        }
+    };
+
+    // =========================================================
+    // 24. 자동 구동 이벤트 리스너
+    // =========================================================
+
+    document.addEventListener('DOMContentLoaded', function() {
+        ['sel_graphic', 'sel_oa', 'sel_imd'].forEach(function(id) {
+            var sel = document.getElementById(id);
+            if (sel) {
+                sel.addEventListener('change', function() {
+                    if (this.value === "") {
+                        showToast("구글 시트와의 연결이 안전하게 해제되었습니다!", "info");
+                        if (typeof currentSheetName !== 'undefined') currentSheetName = "";
+                        if (typeof currentRowIndex !== 'undefined') currentRowIndex = -1;
+                        if (typeof activeSheetName !== 'undefined') activeSheetName = "";
+                        if (typeof activeRowIndex !== 'undefined') activeRowIndex = -1;
+                    }
+                });
+            }
+        });
+    });
+    // =========================================================
+    // ★ CSS 네이티브 창 크기 조절(Resize) 감지기 추가
+    // =========================================================
+    document.addEventListener('DOMContentLoaded', () => {
+        // 크기가 변할 때마다 감지하는 옵저버
+        const resizeObserver = new ResizeObserver(() => {
+            // 내가 타임머신을 타고 이동 중(Undo/Redo)일 때는 사진 찍지 않음!
+            if (!isUndoRedoAction) {
+                saveStateToBrowser(); // 디바운스가 적용된 자연스러운 찰칵
+            }
+        });
+        
+        // 상단 패널과 모든 섹션 박스에 센서 부착
+        document.querySelectorAll('.section, #topPanel').forEach(el => {
+            resizeObserver.observe(el);
+        });
+    });
+    // 브라우저 켜지고 모든 세팅이 끝난 0.5초 뒤, 순정 상태를 타임머신에 찰칵!
+    window.addEventListener('load', () => {
+        setTimeout(() => { saveStateToBrowser(true); }, 500);
+    });
+    // =========================================================
+    // ★ [신규] 개강 버튼 전용 실행 함수
+    // =========================================================
+    function confirmStartCourse() {
+        if (!currentSheetName) { showToast("먼저 과정을 선택해주세요!", "warning"); return; }
+        var pName = document.getElementById('projName').value || savedProjName;
+        var pRound = document.getElementById('projRound').value;
+
+        isUndoRedoAction = true; // ★ 감지 카메라 임시 정지
+
+        setTimeout(function() {
+            if(!confirm(`⚠️ [개강 확정]\n\n정말 [ ${pName} ${pRound} ] 과정을 개강 처리하시겠습니까?\n(D~J열 노란색 채색 및 J열 '개강' 입력)`)) {
+                isUndoRedoAction = false;
+                return;
+            }
+
+            showLoading();
+            var payload = { sheetName: currentSheetName, courseName: pName, round: pRound };
+
+            google.script.run
+                .withSuccessHandler(function(res) {
+                    hideLoading();
+                    if(typeof res === 'object' && res.success) {
+                        showToast(res.msg, "success");
+                        
+                        pendingSheetUndo = { sheetName: res.sheetName, rowNum: res.rowNum, data: res.prevData };
+                        pendingSheetRedo = { sheetName: res.sheetName, rowNum: res.rowNum, data: res.newData };
+                        
+                        isUndoRedoAction = false; // 카메라 켜기
+                        saveStateToBrowser(true); // 완벽한 한 장 찰칵!
+                        
+                        pendingSheetUndo = null;
+                        pendingSheetRedo = null;
+                    } else {
+                        showToast(res.msg || "오류가 발생했습니다.", "error");
+                        isUndoRedoAction = false;
+                    }
+                })
+                .withFailureHandler(function(err) { 
+                    hideLoading(); 
+                    showToast("오류: " + err.message, "error"); 
+                    isUndoRedoAction = false;
+                })
+                .startCourseInSheet(payload);
+        }, 350);
+    }
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,527 @@
+function doGet() {
+  return HtmlService.createTemplateFromFile('Index')
+      .evaluate()
+      .setTitle('HRD 스마트 스케줄러')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+} 
+
+// [수정됨] 시트 이름(sheetName)을 받아서 그 시트 하나만 가져오는 함수
+function getSheetData(sheetName, applyLunch) { 
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let allRows = [];
+  
+  // 1. 오늘 날짜 (필터링용)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const isLunchChecked = (String(applyLunch) === "true");
+
+  // ★ 기존의 반복문(forEach)을 삭제하고, 요청받은 이름의 시트 딱 하나만 엽니다.
+  const sheet = ss.getSheetByName(sheetName);
+  
+  // 시트가 없으면 빈 깡통 반환
+  if (!sheet) return { headers: [], rows: [] }; 
+
+  const data = sheet.getDataRange().getDisplayValues();
+  if (data.length < 2) return { headers: [], rows: [] };
+
+  // --- 헤더 찾기 ---
+  let headerRowIdx = -1;
+  let col = { num: -1, name: -1, round: -1, start: -1, end: -1, time: -1, total: -1, status: -1 };
+
+  for (let i = 0; i < Math.min(data.length, 30); i++) {
+    const rowStr = data[i].join("").replace(/\s/g, "");
+    if (rowStr.includes("과정명") && rowStr.includes("시작일")) {
+      headerRowIdx = i;
+      data[i].forEach((cell, idx) => {
+        const txt = cell.replace(/\s/g, ""); 
+        if ((txt === "" && idx === 0) || txt.includes("1")) col.num = idx; 
+        if (txt.includes("과정명")) col.name = idx;
+        if (txt.includes("회차")) col.round = idx;
+        if (txt.includes("시작일")) col.start = idx;
+        if (txt.includes("종료")) col.end = idx;
+        if (txt.includes("수업시간")) col.time = idx;
+        if (txt.includes("훈련시간") || (txt.includes("시간") && !txt.includes("수업"))) col.total = idx;
+        if (txt.includes("개강") || txt.includes("상태") || txt.includes("여부")) col.status = idx;
+      });
+      if (col.status === -1) col.status = 9; 
+      if (col.num === -1 && col.name > 0) col.num = col.name - 1;
+      break; 
+    }
+  }
+  if (headerRowIdx === -1 || col.name === -1) return { headers: [], rows: [] };
+
+  // --- 데이터 읽기 ---
+  let memoryTitle = "";       
+  
+  for (let r = headerRowIdx + 1; r < data.length; r++) {
+    const row = data[r];
+    if (row.join("").replace(/\s/g, "") === "") {
+        let nextRow = (r+1 < data.length) ? data[r+1].join("").replace(/\s/g, "") : "";
+        if (nextRow === "" || nextRow.includes("과정명")) break; 
+        break;
+    }
+
+    let cellD = row[col.name];      
+    let cellStart = row[col.start]; 
+    
+    if (cellD && cellD.trim() !== "") {
+        const checkStr = cellD.trim();
+        let isDate = (checkStr.includes("월") && checkStr.includes("일")) || (checkStr.includes(":") && checkStr.length < 15);
+        if (!isDate) {
+            memoryTitle = cellD.trim().replace(/^[\d\-\.]+\s*/, "").replace(/\s*\(?\d+h\)?\s*$/i, ""); 
+        }
+    }
+
+    if (cellStart && cellStart.trim() !== "") {
+        // [필터링] 날짜 지남 + 개강 상태 제외
+        let dateStr = cellStart.replace(/\./g, "-").replace(/\s/g, "");
+        let startDateObj = new Date(dateStr);
+        startDateObj.setHours(0, 0, 0, 0);
+        let statusVal = (col.status !== -1 && row[col.status]) ? row[col.status].trim() : "";
+
+        if (startDateObj < today && statusVal.includes("개강")) {
+            continue; 
+        }
+
+        let startTime = "0930"; 
+        let dailyDur = "8";     
+
+        if (col.time !== -1 && row[col.time]) {
+          const tStr = row[col.time]; 
+          let parts = tStr.split(/[-~]/);
+          
+          if (parts.length >= 2) {
+              let s = parts[0].trim();
+              let e = parts[1].trim();
+              let sClean = s.replace(/:/g, "");
+              if (sClean.length === 3) sClean = "0" + sClean;
+              startTime = sClean;
+
+              let sMin = parseToMinutes(s); 
+              let eMin = parseToMinutes(e); 
+
+              if (sMin > 0 && eMin > 0) {
+                  let totalMin = eMin - sMin; 
+                  // [점심 차감] 4시간(240분) 초과 시에만 적용
+                  if (isLunchChecked === true && totalMin > 240) {
+                      const lStart = 750; const lEnd = 780;   
+                      let overlapStart = Math.max(sMin, lStart);
+                      let overlapEnd = Math.min(eMin, lEnd);
+                      let overlap = Math.max(0, overlapEnd - overlapStart);
+                      totalMin = totalMin - overlap;
+                  }
+                  dailyDur = totalMin / 60; 
+              }
+          }
+        }
+
+        let finalTitle = memoryTitle || "제목없음";
+        let roundInfo = (col.round !== -1) ? row[col.round] : "";
+        if (roundInfo && roundInfo.toString().trim() !== "") {
+            let rText = roundInfo.toString().trim();
+            if (!isNaN(rText)) rText += "회차";
+            finalTitle += ` (${rText})`;
+        }
+
+        allRows.push([
+            finalTitle, row[col.start], startTime, dailyDur, "", 
+            row[col.end] || "", row[col.round] || "", row[25] || "", row[12] || ""
+        ]);
+    }
+  }
+  
+  return { headers: [], rows: allRows };
+}
+
+function parseToMinutes(timeStr) {
+  try {
+    if (!timeStr) return 0;
+    timeStr = timeStr.replace(/\s/g, "");
+    let h = 0, m = 0;
+    if (timeStr.includes(":")) {
+      let parts = timeStr.split(":");
+      h = parseInt(parts[0], 10); m = parseInt(parts[1], 10);
+    } else if (timeStr.length === 4) {
+      h = parseInt(timeStr.substring(0, 2), 10); m = parseInt(timeStr.substring(2, 4), 10);
+    }
+    return (h * 60) + m;
+  } catch (e) { return 0; }
+}
+
+/**
+ * 과정명과 회차를 찾아 종료일을 F열에 업데이트하는 함수 (가채점 2단계 완벽 매칭 버전)
+ */
+function updateEndDate(sheetName, courseName, round, endDate) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) return { success: false, msg: "❌ 오류: 시트 이름이 다릅니다. (" + sheetName + ")" };
+  
+  var data = sheet.getDataRange().getValues();
+  
+  var targetNameClean = normalizeName(courseName);
+  var targetRound = String(round).replace(/[^0-9]/g, ""); 
+  
+  var lastSeenCourseName = ""; 
+  var lastSeenCleanName = "";
+  
+  // ★ 1단계: 해당 회차(예: 1회)를 가진 모든 과정명 후보를 수집합니다.
+  var candidates = [];
+
+  for (var i = 1; i < data.length; i++) {
+    // 1. 회차 읽기 (D열 = 인덱스 3)
+    var currentRoundCell = String(data[i][3]).replace(/[^0-9]/g, ""); 
+    
+    // 2. 과정명 기억하기 (A~C열)
+    for (var col = 0; col <= 2; col++) {
+      var cellVal = String(data[i][col]).trim();
+      var isDateOrNum = /^[\d\-\.\/:\s~]+$/.test(cellVal) || /\d{1,2}월\s*\d{1,2}일/.test(cellVal);
+      
+      // (이전 버그 방어막 적용: 숫자, 날짜 무시 + 길이 3글자 이상)
+      if (cellVal.length > 2 && !isDateOrNum) {
+        lastSeenCourseName = cellVal;
+        lastSeenCleanName = normalizeName(cellVal);
+        break; 
+      }
+    }
+
+    // 3. 찾는 회차와 동일한 줄을 발견하면, 당시 기억하고 있던 과정명을 후보 리스트에 등록
+    if (lastSeenCleanName.length > 0 && currentRoundCell === targetRound) {
+       candidates.push({
+         rowIdx: i,
+         cleanName: lastSeenCleanName,
+         originalName: lastSeenCourseName
+       });
+    }
+  }
+
+  if (candidates.length === 0) {
+     return { success: false, msg: "❌ 찾기 실패!\n시트 D열에서 해당 회차(" + targetRound + "회)를 아예 찾지 못했습니다." };
+  }
+
+  // ★ 2단계: 수집된 후보들 중에서 "가장 완벽한 짝"을 찾습니다.
+  var bestMatch = null;
+
+  for (var j = 0; j < candidates.length; j++) {
+     if (candidates[j].cleanName === targetNameClean) {
+        bestMatch = candidates[j];
+        break;
+     }
+  }
+
+  if (!bestMatch) {
+     for (var j = 0; j < candidates.length; j++) {
+        var cName = candidates[j].cleanName;
+        var lenDiff = Math.abs(cName.length - targetNameClean.length);
+        
+        if (lenDiff <= 3 && (cName.includes(targetNameClean) || targetNameClean.includes(cName))) {
+           bestMatch = candidates[j];
+           break;
+        }
+     }
+  }
+
+  // ★ 3단계: 최종 매칭된 곳에 날짜 저장
+  if (bestMatch) {
+      var rowNum = bestMatch.rowIdx + 1;
+      
+      // 📸 [수퍼 타임머신] 작업 전 스냅샷 찰칵!
+      var prevData = getRowSnapshot(sheet, rowNum);
+      
+      sheet.getRange(rowNum, 6).setValue(endDate); 
+      SpreadsheetApp.flush(); // 강제 동기화 (Redo 픽스)
+      
+      // 📸 [수퍼 타임머신] 작업 후 스냅샷 찰칵!
+      var newData = getRowSnapshot(sheet, rowNum);
+      
+      return { 
+          success: true, 
+          msg: "✅ 저장 성공!\n매칭된 과정: " + bestMatch.originalName + "\n회차: " + (targetRound || "없음") + "회",
+          sheetName: sheetName,
+          rowNum: rowNum,
+          prevData: prevData,
+          newData: newData
+      };
+  } else {
+      var failMsg = "❌ 찾기 실패!\n\n1. [목표 과정명]\n- " + targetNameClean + "\n\n2. [비슷한 회차를 가진 시트 내 후보들]\n";
+      for (var k = 0; k < Math.min(candidates.length, 5); k++) {
+          failMsg += "- " + candidates[k].cleanName.substring(0, 15) + "...\n";
+      }
+      return { success: false, msg: failMsg };
+  }
+}
+
+// [도우미 함수] 이름 정제기 (스마트 중첩 괄호 제거 기능)
+function normalizeName(name) {
+  if (!name) return "";
+  let result = String(name);
+  
+  // 1. 소괄호 () 중첩 완벽 제거
+  while (/\([^()]*\)/.test(result)) {
+    result = result.replace(/\([^()]*\)/g, "");
+  }
+  
+  // 2. 대괄호 [] 중첩 완벽 제거
+  while (/\[[^\[\]]*\]/.test(result)) {
+    result = result.replace(/\[[^\[\]]*\]/g, "");
+  }
+  
+  // 3. 특수문자, 공백 등 모두 제거 (순수 한글/영문/숫자만 남김)
+  return result.replace(/[^가-힣a-zA-Z0-9]/g, "");
+}
+
+// [신규] 작업 상태(JSON)를 시트의 Z열에 저장하는 함수 기존의 '종강일 저장' 로직을 응용하여 정확한 위치를 찾습니다.
+function saveConfigToSheet(sheetName, courseName, round, jsonString) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return "❌ 시트 없음";
+  
+  var data = sheet.getDataRange().getValues();
+  var targetNameClean = normalizeName(courseName);
+  var targetRound = String(round).replace(/[^0-9]/g, ""); 
+  
+  // (기존의 강력한 매칭 로직 재사용)
+  var candidates = [];
+  var lastSeenCourseName = "", lastSeenCleanName = "";
+
+  for (var i = 1; i < data.length; i++) {
+    var currentRoundCell = String(data[i][3]).replace(/[^0-9]/g, ""); 
+    for (var col = 0; col <= 2; col++) {
+      var cellVal = String(data[i][col]).trim();
+      var isDateOrNum = /^[\d\-\.\/:\s~]+$/.test(cellVal) || /\d{1,2}월\s*\d{1,2}일/.test(cellVal);
+      if (cellVal.length > 2 && !isDateOrNum) {
+        lastSeenCourseName = cellVal;
+        lastSeenCleanName = normalizeName(cellVal);
+        break; 
+      }
+    }
+    if (lastSeenCleanName.length > 0 && currentRoundCell === targetRound) {
+       candidates.push({ rowIdx: i, cleanName: lastSeenCleanName });
+    }
+  }
+
+  // 매칭 대상 찾기
+  var bestMatch = null;
+  for (var j = 0; j < candidates.length; j++) {
+     if (candidates[j].cleanName === targetNameClean) { bestMatch = candidates[j]; break; }
+  }
+  if (!bestMatch && candidates.length > 0) { // 차선책
+     for (var j = 0; j < candidates.length; j++) {
+        if (candidates[j].cleanName.includes(targetNameClean) || targetNameClean.includes(candidates[j].cleanName)) {
+           bestMatch = candidates[j]; break;
+        }
+     }
+  }
+
+  // 저장 실행 (Z열 = 인덱스 26, 즉 26번째 칸)
+  if (bestMatch) {
+      var targetCell = sheet.getRange(bestMatch.rowIdx + 1, 26);
+      
+      // 1. 데이터 저장
+      targetCell.setValue(jsonString); 
+      
+      // 2. ★ 시트 작업표 침범 방지용 자동 서식 적용 ★
+      targetCell.setHorizontalAlignment("left"); // 왼쪽 정렬 (가운데로 퍼지지 않게)
+      targetCell.setFontSize(6);                 // 글자 크기 최소화 (6pt)
+      targetCell.setFontColor("#e0e0e0");        // 연한 회색으로 변경 (눈에 거슬리지 않게)
+      targetCell.setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP); // 셀 밖으로 삐져나가는 것 완벽 차단!
+      
+      return "✅ 클라우드 저장 성공! (Z열)";
+  } else {
+      return "❌ 저장 실패: 해당 과정/회차를 시트에서 찾을 수 없습니다.";
+  }
+}
+
+/**
+ * [마스터 컨트롤 타워] 시작일, 시간, 변경이력(K,L), BJN(M), 백업(Z) 일괄 업데이트
+ */
+function masterSaveToSheet(payload) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(payload.sheetName);
+  if (!sheet) return { success: false, msg: "❌ 시트 없음" };
+  
+  var data = sheet.getDataRange().getValues();
+  var targetNameClean = normalizeName(payload.courseName);
+  var targetRound = String(payload.round).replace(/[^0-9]/g, ""); 
+  
+  // ★ 1. 완벽한 매칭 로직 (병합된 셀도 뚫고 과정명 찾아내기)
+  var candidates = [];
+  var lastSeenCourseName = "", lastSeenCleanName = "";
+
+  for (var i = 1; i < data.length; i++) {
+    var currentRoundCell = String(data[i][3]).replace(/[^0-9]/g, ""); 
+    for (var col = 0; col <= 2; col++) {
+      var cellVal = String(data[i][col]).trim();
+      var isDateOrNum = /^[\d\-\.\/:\s~]+$/.test(cellVal) || /\d{1,2}월\s*\d{1,2}일/.test(cellVal);
+      if (cellVal.length > 2 && !isDateOrNum) {
+        lastSeenCourseName = cellVal;
+        lastSeenCleanName = normalizeName(cellVal);
+        break; 
+      }
+    }
+    if (lastSeenCleanName.length > 0 && currentRoundCell === targetRound) {
+       candidates.push({ rowIdx: i, cleanName: lastSeenCleanName });
+    }
+  }
+
+  var bestMatch = null;
+  for (var j = 0; j < candidates.length; j++) {
+     if (candidates[j].cleanName === targetNameClean) { bestMatch = candidates[j]; break; }
+  }
+  if (!bestMatch && candidates.length > 0) {
+     for (var j = 0; j < candidates.length; j++) {
+        if (candidates[j].cleanName.includes(targetNameClean) || targetNameClean.includes(candidates[j].cleanName)) {
+           bestMatch = candidates[j]; break;
+        }
+     }
+  }
+
+  // ★ 2. 데이터 업데이트 실행
+  if (bestMatch) {
+      var rowNum = bestMatch.rowIdx + 1; // 실제 시트 행 번호
+      
+      // 📸 [수퍼 타임머신] 마스터 저장 시작 전 스냅샷 찰칵!
+      var prevData = getRowSnapshot(sheet, rowNum);
+      
+      // 훈련시작일(E열=5) 및 수업시간(G열=7) 업데이트
+      sheet.getRange(rowNum, 5).setValue(payload.newStartDate);
+      sheet.getRange(rowNum, 7).setValue(payload.newClassTime);
+
+      // 날짜가 변경되었다면 K열(변경일), L열(변경전) 이력 기록
+      if (payload.isDateChanged && payload.originalStartDate) {
+        var today = new Date();
+        var kVal = (today.getMonth() + 1) + "/" + today.getDate(); // 예: 2/25
+        
+        // 날짜 포맷 기호(., -, /)에 상관없이 월/일 추출
+        var lVal = payload.originalStartDate;
+        var dateMatch = payload.originalStartDate.match(/(\d{4})[-\.\/]\s*(\d{1,2})[-\.\/]\s*(\d{1,2})/);
+        if (dateMatch) {
+            lVal = parseInt(dateMatch[2], 10) + "/" + parseInt(dateMatch[3], 10);
+        }
+        
+        sheet.getRange(rowNum, 11).setValue(kVal); // K열
+        sheet.getRange(rowNum, 12).setValue(lVal); // L열
+      }
+
+      // M열(BJN 변경) 지시사항 완료 처리 (글자+색상 제거)
+      if (payload.clearMColumn) {
+        sheet.getRange(rowNum, 13).clearContent().setBackground(null);
+      }
+
+      // Z열(26) 숨김 데이터 저장 (왼쪽정렬, 크기6, Clip)
+      sheet.getRange(rowNum, 26).setValue(payload.jsonData)
+           .setHorizontalAlignment("left")
+           .setFontSize(6)
+           .setFontColor("#e0e0e0")
+           .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+           
+      SpreadsheetApp.flush(); // ★ 강제 동기화
+           
+      // 📸 [수퍼 타임머신] 마스터 저장 끝난 후 미래 스냅샷 찰칵!
+      var newData = getRowSnapshot(sheet, rowNum);     
+           
+      return {
+          success: true,
+          msg: " [마스터 모드] 구글 시트 원격 자동 업데이트 완료!\n(시작일, 시간, M열 삭제, Z열 백업 적용)",
+          sheetName: payload.sheetName,
+          rowNum: rowNum,
+          prevData: prevData,
+          newData: newData
+      };
+  } else {
+      return { success: false, msg: "❌ 저장 실패: 시트에서 해당 과정을 찾을 수 없습니다." };
+  }
+}
+
+// =========================================================
+// ★ [수퍼 타임머신] 구글 시트 스냅샷 & 복구 엔진
+// =========================================================
+
+// 특정 행(Row)의 D열(4) ~ M열(13) 및 Z열(26) 데이터를 사진 찍듯 백업하는 함수
+function getRowSnapshot(sheet, rowNum) {
+    var rangeMain = sheet.getRange(rowNum, 4, 1, 10); // D ~ M
+    var rangeZ = sheet.getRange(rowNum, 26, 1, 1);    // Z
+    return {
+        mainVals: rangeMain.getValues()[0], mainBgs: rangeMain.getBackgrounds()[0], mainFcs: rangeMain.getFontColors()[0], mainFws: rangeMain.getFontWeights()[0],
+        zVals: rangeZ.getValues()[0], zBgs: rangeZ.getBackgrounds()[0], zFcs: rangeZ.getFontColors()[0], zFws: rangeZ.getFontWeights()[0]
+    };
+}
+
+// 타임머신(Undo/Redo) 발동 시, 스케줄러가 보내준 사진(과거 데이터)으로 시트를 덮어씌우는 함수
+function restoreSuperAction(payload) {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(payload.sheetName);
+    if(!sheet) return false;
+    
+    // ★ 망가진 날짜(Date) 데이터를 시트가 이해할 수 있게 완벽 번역! (날짜 Undo 오류 완벽 픽스)
+    var parsedMainVals = payload.data.mainVals.map(function(val) {
+        if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(val)) {
+            return new Date(val);
+        }
+        return val;
+    });
+
+    var rangeMain = sheet.getRange(payload.rowNum, 4, 1, 10);
+    rangeMain.setValues([parsedMainVals]);
+    rangeMain.setBackgrounds([payload.data.mainBgs]);
+    rangeMain.setFontColors([payload.data.mainFcs]);
+    rangeMain.setFontWeights([payload.data.mainFws]);
+
+    var rangeZ = sheet.getRange(payload.rowNum, 26, 1, 1);
+    rangeZ.setValues([payload.data.zVals]);
+    rangeZ.setBackgrounds([payload.data.zBgs]);
+    rangeZ.setFontColors([payload.data.zFcs]);
+    rangeZ.setFontWeights([payload.data.zFws]);
+    
+    SpreadsheetApp.flush(); // 즉시 확정
+    return true;
+}
+
+// =========================================================
+// ★ [신규] 개강 버튼 클릭 시 작동하는 전용 함수
+// =========================================================
+function startCourseInSheet(payload) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(payload.sheetName);
+    if (!sheet) return { success: false, msg: "시트를 찾을 수 없습니다." };
+
+    // --- 행(Row) 찾기 로직 ---
+    var data = sheet.getDataRange().getValues();
+    var bestMatch = { rowIdx: -1, score: -1 };
+    var pName = String(payload.courseName).trim().replace(/\s/g, "");
+    var pRound = String(payload.round).trim().replace(/\s/g, "");
+
+    // (※ 담당자님의 기존 매칭 방식 응용)
+    for (var i = 1; i < data.length; i++) {
+        var rName = String(data[i][1] || "").trim().replace(/\s/g, ""); // B열: 과정명
+        var rRound = String(data[i][3] || "").trim().replace(/\s/g, ""); // D열: 회차 
+        var score = 0;
+        if (rName.indexOf(pName) !== -1 || pName.indexOf(rName) !== -1) score += 10;
+        if (rRound.includes(pRound) || pRound.includes(rRound)) score += 5;
+        if (score > bestMatch.score) { bestMatch.score = score; bestMatch.rowIdx = i; }
+    }
+    if (bestMatch.score < 10) return { success: false, msg: "일치하는 과정을 찾을 수 없습니다." };
+    var rowNum = bestMatch.rowIdx + 1;
+
+    // 1. 작업 전 스냅샷 찰칵!
+    var prevData = getRowSnapshot(sheet, rowNum);
+
+    // 2. 개강 작업 실행: D~J(7칸) 노란색 채색 및 J열에 '개강' 입력
+    var targetRange = sheet.getRange(rowNum, 4, 1, 7);
+    targetRange.setBackground('#FFFF00'); // 노란색
+    sheet.getRange(rowNum, 10).setValue('개강'); // J열
+    
+    SpreadsheetApp.flush(); // ★ 노란색 칠하고 즉시 확정 (Redo 버그 픽스)
+
+    // 3. 작업 후 스냅샷 찰칵!
+    var newData = getRowSnapshot(sheet, rowNum);
+
+    return { 
+        success: true, 
+        msg: "구글 시트 개강 처리가 완료되었습니다!", 
+        sheetName: payload.sheetName, 
+        rowNum: rowNum, 
+        prevData: prevData, 
+        newData: newData 
+    };
+}
